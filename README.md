@@ -108,6 +108,9 @@ python run_scenarios.py
 |---|---|---|
 | S01 | San Diego to Subic Bay | Basic logic: across the Pacific and into the Philippines through the San Bernardino Strait, 6,733 nm |
 | S02 | The same, with a 150 nm area of denial over the San Bernardino Strait | The route moves to the Luzon Strait, 6,768 nm (+35 nm) |
+| S03 | Yokosuka to Singapore, with the Luzon Strait denied | The route moves from east of Taiwan to the Taiwan Strait, 2,977 nm (+26 nm) |
+| S04 | Guam to Manila, with the Luzon and San Bernardino Straits both denied | The route goes south, in through the Surigao Strait and up through the Mindoro Strait, 1,864 nm (+165 nm) |
+| S05 | Honolulu to Kao-Hsiung, with an area of denial around all of Taiwan | No route is possible, because the destination is inside the area, and the report says so |
 
 The report goes to `reports/<date>_<time>/`:
 
