@@ -369,7 +369,7 @@ def write_report(out_dir, run, results, prev_when, prev):
 <title>Sea Network Scenarios</title><style>%s</style></head>
 <body><main>
 <h1>FALCON sea network · scenario report</h1>
-<div class="meta">Run %s · code %s · %d scenarios · %s</div>
+<div class="meta">Run on %s · code %s · %d scenarios · %s</div>
 <div class="tally"><div><b>%d</b>scenarios</div><div><b class="%s" style="background:none">%d</b>passed</div>
 <div><b class="%s" style="background:none">%d</b>failed</div><div><b>%d</b>checks</div></div>
 <section class="card wrap"><table>
@@ -398,7 +398,7 @@ def main(argv=None):
     files = args.files or sorted(glob.glob(os.path.join(SCENARIOS, "*.json")))
     if not files:
         raise SystemExit("No scenario files found in %s." % SCENARIOS)
-    started = datetime.now()
+    started = datetime.now().astimezone()
     out_dir = args.out or os.path.join(REPORTS, started.strftime("%Y-%m-%d_%H%M%S"))
     snap_dir = os.path.join(out_dir, "snapshots")
     os.makedirs(snap_dir, exist_ok=True)
@@ -433,7 +433,7 @@ def main(argv=None):
                                          r["to"]["name"], "%s nm" % _nm(best["length_nm"]) if best else "blocked",
                                          "".join("\n         failed: " + f for f in fails)))
 
-    run = {"started": started.strftime("%Y-%m-%d %H:%M:%S"), "code": git_version(),
+    run = {"started": started.strftime("%Y-%m-%d %H:%M:%S UTC%z"), "code": git_version(),
            "data": "neo4j-datamodel (MARNET 100 km)", "passed": sum(r["passed"] for r in results),
            "failed": sum(not r["passed"] for r in results)}
     prev_when, prev = previous_results(out_dir)

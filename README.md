@@ -112,7 +112,9 @@ python run_scenarios.py
 | S04 | Guam to Manila, with the Luzon and San Bernardino Straits both denied | The route goes south, in through the Surigao Strait and up through the Mindoro Strait, 1,864 nm (+165 nm) |
 | S05 | Honolulu to Kao-Hsiung, with an area of denial around all of Taiwan | No route is possible, because the destination is inside the area, and the report says so |
 
-The report goes to `reports/<date>_<time>/`:
+Each run writes a new report to `reports/<date>_<time>/`, for example
+`reports/2026-10-29_151023/`, and the report shows the same time with its
+time zone. Reports are kept in the repository, so every run has a record:
 
 - `report.html` is one file with the maps inside, ready to send as it is.
 - `results.json` holds the same results for other tools.
