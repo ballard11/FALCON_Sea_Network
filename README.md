@@ -1,10 +1,11 @@
 # FALCON Sea Network
 
 Sea routes between any two of 3,806 ports, along real shipping lanes, with K
-alternative routes. It contains a worldwide port and shipping-lane data model
-for Neo4j, plus a small map that shows origin, destination and the K routes.
+alternative routes. Draw areas of denial (circles or polygons) and the routes
+find their way around them. It contains a worldwide port and shipping-lane
+data model for Neo4j, plus a small map to show it working.
 
-![Busan to Subic Bay, four distinct corridors](docs/distinct-corridors.jpg)
+![Busan to Subic Bay with two denial areas: the original route (dashed) is blocked, and the new routes go around](docs/area-denial.jpg)
 
 ## Run it
 
@@ -14,9 +15,42 @@ Needs Python 3.8 or later and nothing else (standard library only).
 python server.py
 ```
 
-Then open http://localhost:8100. Type or pick an origin port and a destination
-port, choose K (1 to 5) and a method, and select **Find routes**. Routes take
-milliseconds.
+Then open http://localhost:8100.
+
+1. Type or pick an origin port and a destination port, choose K (1 to 5) and a
+   method, and select **Find routes**.
+2. Under **Areas of denial**, choose **Circle** (press and drag) or **Polygon**
+   (click the corners, then double-click or press Enter). Routes recompute as
+   soon as an area is finished.
+3. Draw as many areas as you like; remove one with its ×, or **Clear all**.
+
+The mouse wheel zooms and dragging pans. Routes take milliseconds.
+
+## Areas of denial
+
+Every link whose real path enters an area is closed, and the search runs on
+what is left. Routes bend around the area rather than losing whole port-to-port
+lanes, because the closure applies to stretches of water, not to lanes between
+ports.
+
+- **A circle** is a true circle on the globe. Its radius is in nautical miles,
+  measured along the earth's surface.
+- **A polygon's sides** are straight in latitude and longitude, which is exactly
+  how they look on this map.
+- **Every stretch of a lane is tested,** at most 10 nm apart, plus an exact check
+  on each straight piece, so even a 3 nm circle catches a lane passing through it.
+- **A port inside an area is closed.** If the origin or destination is inside,
+  the result says so.
+- **The map shows the original route dashed in grey,** next to the new routes,
+  with the extra distance. Extra days use a nominal 18 knots, for a rough sense
+  only.
+
+| Busan to Subic Bay | Best route | Via |
+|---|---|---|
+| No areas | 1,450 nm | Korea Strait, Taiwan Strait |
+| Polygon over the Taiwan Strait | 1,453 nm | Korea Strait, Luzon Strait |
+| That polygon, plus a 239 nm circle over the Luzon Strait | 1,969 nm | Korea Strait, San Bernardino Strait |
+| 239 nm circle over the Luzon Strait only | 1,450 nm (unchanged) | The original route never goes near Luzon |
 
 ## How routing works
 
@@ -54,6 +88,35 @@ its own waters.
 | #2 | 1,450 nm, Taiwan Strait | 1,453 nm, Luzon Strait, east of Taiwan |
 | #3 | 1,451 nm, Taiwan Strait | 1,587 nm, Luzon Strait, across the East China Sea |
 | #4 | 1,451 nm, Taiwan Strait | 1,643 nm, Luzon Strait, east of the Ryukyu Islands |
+
+![Busan to Subic Bay, four distinct corridors](docs/distinct-corridors.jpg)
+
+Both methods respect areas of denial.
+
+## API
+
+`server.py` answers two requests:
+
+- `GET /api/ports` returns every port: `id`, `name`, `country`, `lat`, `lon`, `size`.
+- `POST /api/routes` takes a JSON body and returns the routes:
+
+```json
+{
+  "from": "WPI-60390",
+  "to": "WPI-58395",
+  "k": 3,
+  "method": "distinct",
+  "areas": [
+    {"type": "circle", "center": [124.2, 22.43], "radius_nm": 239},
+    {"type": "polygon", "points": [[118.5, 26.5], [121.8, 25.6], [121.0, 21.8], [119.0, 22.2]]}
+  ]
+}
+```
+
+Points are `[longitude, latitude]`. The response holds `original` (the best route
+with no areas), `routes` (ranked, each with `length_nm`, `passages` and the
+`line` to draw), `closed_links`, whether the areas `affected` the original
+route, `extra_nm`, and `blocked` with a reason when no route is possible.
 
 ## What's here
 
