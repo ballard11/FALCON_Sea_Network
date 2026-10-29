@@ -93,6 +93,33 @@ its own waters.
 
 Both methods respect areas of denial.
 
+## Scenario tests
+
+`scenarios/` holds test scenarios, one JSON file each: an origin, a
+destination, any areas of denial, and what the answer should be. One command
+runs them all and writes a report with two map snapshots per scenario, the whole
+route and a close-up of the areas of denial (or the destination).
+
+```bash
+python run_scenarios.py
+```
+
+| Scenario | Move | What it shows |
+|---|---|---|
+| S01 | San Diego to Subic Bay | Basic logic: across the Pacific and into the Philippines through the San Bernardino Strait, 6,733 nm |
+| S02 | The same, with a 150 nm area of denial over the San Bernardino Strait | The route moves to the Luzon Strait, 6,768 nm (+35 nm) |
+
+The report goes to `reports/<date>_<time>/`:
+
+- `report.html` is one file with the maps inside, ready to send as it is.
+- `results.json` holds the same results for other tools.
+- `snapshots/` holds each map as SVG, plus PNG when Edge or Chrome is installed.
+
+Each report compares the best route with the previous run's, so a change
+in the data or the routing shows up. The command exits with 1 if any check
+fails, so it can run in CI. To add a scenario, copy a file in `scenarios/`;
+[scenarios/README.md](scenarios/README.md) lists every field and expectation.
+
 ## API
 
 `server.py` answers two requests:
@@ -126,6 +153,9 @@ route, `extra_nm`, and `blocked` with a reason when no route is possible.
 | `sea_routing.py` | Shortest path (A*), Yen's K shortest, and distinct corridors |
 | `server.py` | A small web server for the map |
 | `web/` | The map page, with d3-geo and the Natural Earth coastline |
+| `run_scenarios.py` | Runs the scenarios, checks the answers, writes the report |
+| `map_snapshot.py` | Draws a scenario's map as SVG (and PNG) |
+| `scenarios/` | The test scenarios, one JSON file each |
 
 To use the data in Neo4j instead, follow `neo4j-datamodel/START_HERE.md`.
 `neo4j-datamodel/ASSUMPTIONS.md` lists every filter, default and known gap.
