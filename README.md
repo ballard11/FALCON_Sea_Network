@@ -111,6 +111,11 @@ python run_scenarios.py
 | S03 | Yokosuka to Singapore, with the Luzon Strait denied | The route moves from east of Taiwan to the Taiwan Strait, 2,977 nm (+26 nm) |
 | S04 | Guam to Manila, with the Luzon and San Bernardino Straits both denied | The route goes south, in through the Surigao Strait and up through the Mindoro Strait, 1,864 nm (+165 nm) |
 | S05 | Honolulu to Kao-Hsiung, with an area of denial around all of Taiwan | No route is possible, because the destination is inside the area, and the report says so |
+| S06 | Colombo to Yokosuka, with the Strait of Malacca denied | The route moves south of Sumatra and through the Sunda Strait, 5,183 nm (+588 nm) |
+| S07 | Diego Garcia to Yokosuka, with the Malacca, Sunda and Lombok Straits all denied | The route goes past Western Australia and Timor and up through the Molucca Sea, 6,567 nm (+1,208 nm) |
+| S08 | Singapore to Manila, with the central South China Sea denied | The route goes around Borneo and through the Makassar Strait, 2,150 nm (+808 nm) |
+| S09 | Sasebo to Guam, with the Ryukyu Islands and the waters south of Kyushu denied | The route goes north around Kyushu and down its east coast, 1,659 nm (+115 nm) |
+| S10 | Manila to Puerto Princesa, with the Mindoro Strait denied | The route goes east of Mindoro and across the Sulu Sea, 672 nm (+265 nm) |
 
 Each run writes a new report to `reports/<date>_<time>/`, for example
 `reports/2026-10-29_151023/`, and the report shows the same time with its
