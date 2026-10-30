@@ -166,6 +166,7 @@ route, `extra_nm`, and `blocked` with a reason when no route is possible.
 | `run_scenarios.py` | Runs the scenarios, checks the answers, writes the report |
 | `map_snapshot.py` | Draws a scenario's map as SVG (and PNG) |
 | `scenarios/` | The test scenarios, one JSON file each |
+| `cargo_capability.py`, `cargo/` | Rates each port for each class of supply. See [cargo/README.md](cargo/README.md) |
 
 To use the data in Neo4j instead, follow `neo4j-datamodel/START_HERE.md`.
 `neo4j-datamodel/ASSUMPTIONS.md` lists every filter, default and known gap.

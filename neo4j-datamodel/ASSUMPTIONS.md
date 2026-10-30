@@ -38,6 +38,15 @@ updates nightly, so a handful of runways may have changed between them.
   known, that one is used. `controlling_depth_basis` records which case applies.
 - **Yes/No/Unknown** facility fields load as true, false or blank. The text
   "Unknown" loads as blank everywhere.
+- **`marine_railway` is not rail access.** NGA's "Railway" field is a slipway
+  for hauling ships out for repair, sized in tons (Small up to 200, Medium
+  201–1,000, Large over 1,000). Rail access to the port is NGA's
+  "Communications - Rail", loaded as `rail_access`.
+- **Facility fields kept for the cargo rules:** lift bands (`lifts_*`),
+  `rail_access`, `airport_nearby`, longshoremen, electricity, dangerous cargo
+  anchorage, medical, waste disposal, port security (ISPS), US representative,
+  quarantine and turning area. `cargo_capability.py` and
+  `cargo/cargo_classes.json` use them.
 - **`country` holds country names.** NGA's column is called "Country Code" but
   contains names such as "Japan".
 - **49 of NGA's 109 columns are loaded**, plus 6 derived here: identity, location, harbor

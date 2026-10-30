@@ -124,7 +124,7 @@ Runway feasibility for a given aircraft: compare `Airfield.longest_paved_runway_
 
 | File | Becomes |
 |---|---|
-| `nodes/ports.csv` | `Port`, one per NGA port: 55 columns, plus a `location` point |
+| `nodes/ports.csv` | `Port`, one per NGA port: 71 columns, plus a `location` point |
 | `nodes/airfields.csv` | `Airfield` |
 | `nodes/runways.csv` | `Runway`, linked by `HAS_RUNWAY` |
 | `nodes/sea_nodes.csv` | `SeaNode` |

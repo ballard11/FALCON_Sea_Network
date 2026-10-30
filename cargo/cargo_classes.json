@@ -1,0 +1,102 @@
+{
+  "_about": "Rules that rate each port for each supply class. Field names are columns of neo4j-datamodel/nodes/ports.csv. Read by cargo_capability.py; see cargo/README.md.",
+
+  "vessels": {
+    "_note": "Nominal drafts for the demo, not a specific ship class. Change them here.",
+    "container": {"name": "Container ship", "draft_m": 11.0},
+    "roro":      {"name": "Ro-Ro vehicle carrier", "draft_m": 10.0},
+    "tanker":    {"name": "Product tanker", "draft_m": 11.0},
+    "breakbulk": {"name": "General cargo / breakbulk ship", "draft_m": 9.0},
+    "bulk":      {"name": "Dry bulk carrier", "draft_m": 10.0}
+  },
+
+  "depth": {
+    "_note": "WPI depths are banded: most are the lower edge of a 5 ft (1.5 m) range, e.g. 9.4 m is 31-35 ft, and tide is not counted. A port up to this much shallower than the draft is marginal (Inferred), not ruled out.",
+    "marginal_m": 2.0
+  },
+
+  "inference_defaults": {
+    "_note": "An Unknown requirement counts as Inferred when the port meets all of these. Override per class with \"infer\", or set \"infer\": null to allow no inference.",
+    "min_harbor_size": "Medium",
+    "min_pier_m": 9.0,
+    "any_yes": ["lifts_100t_plus", "lifts_50_100t", "fac_container", "fac_breakbulk", "rail_access"]
+  },
+
+  "classes": {
+    "I": {
+      "name": "Subsistence",
+      "moves_as": "Containers, some refrigerated",
+      "vessel": "container",
+      "requires": [["fac_container", "fac_breakbulk"]],
+      "supports": ["services_electricity", "rail_access", "supply_provisions"]
+    },
+    "II": {
+      "name": "Clothing and equipment",
+      "moves_as": "Containers",
+      "vessel": "container",
+      "requires": [["fac_container", "fac_breakbulk"]],
+      "supports": ["services_longshoremen", "lifts_0_24t"]
+    },
+    "III": {
+      "name": "Petroleum",
+      "moves_as": "Liquid bulk, by tanker",
+      "vessel": "tanker",
+      "requires": [["fac_liquid_bulk", "fac_oil_terminal"]],
+      "supports": ["supply_fuel_oil", "supply_diesel", "supply_aviation_fuel", "dirty_ballast_disposal"],
+      "infer": {
+        "min_harbor_size": "Medium",
+        "min_pier_m": 9.0,
+        "any_yes": ["supply_fuel_oil", "supply_diesel"]
+      }
+    },
+    "IV": {
+      "name": "Construction material",
+      "moves_as": "Breakbulk and dry bulk",
+      "vessel": "breakbulk",
+      "requires": [["fac_breakbulk", "fac_solid_bulk"]],
+      "supports": ["lifts_25_49t", "lifts_50_100t", "cranes_mobile", "cranes_floating", "rail_access"]
+    },
+    "V": {
+      "name": "Ammunition",
+      "moves_as": "Containers or breakbulk, explosive",
+      "vessel": "breakbulk",
+      "requires": [["fac_dangerous_cargo_anchorage"], ["fac_breakbulk", "fac_container"]],
+      "supports": ["port_security_isps", "turning_area"],
+      "infer": null,
+      "_note": "No inference: explosives handling is never assumed. Only a recorded Yes or an override makes a port usable."
+    },
+    "VI": {
+      "name": "Personal demand items",
+      "moves_as": "Containers",
+      "vessel": "container",
+      "requires": [["fac_container"]],
+      "supports": []
+    },
+    "VII": {
+      "name": "Major end items",
+      "moves_as": "Ro-Ro and heavy lift",
+      "vessel": "roro",
+      "requires": [["fac_roro", "lifts_100t_plus"]],
+      "supports": ["cranes_floating", "turning_area", "rail_access"],
+      "infer": {
+        "min_harbor_size": "Medium",
+        "min_pier_m": 9.0,
+        "any_yes": ["lifts_50_100t", "cranes_floating", "rail_access"]
+      }
+    },
+    "VIII": {
+      "name": "Medical supplies",
+      "moves_as": "Containers, some refrigerated",
+      "vessel": "container",
+      "requires": [["fac_container"]],
+      "supports": ["services_electricity", "medical_facilities", "airport_nearby"]
+    },
+    "IX": {
+      "name": "Repair parts",
+      "moves_as": "Containers",
+      "vessel": "container",
+      "requires": [["fac_container"]],
+      "supports": ["airport_nearby", "rail_access"]
+    }
+  }
+}
