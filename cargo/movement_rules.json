@@ -1,0 +1,32 @@
+{
+  "_about": "How cargo moves through a scenario: who carries each leg, and where cargo changes hands. Read by cargo_movement.py; see cargo_scenarios/README.md.",
+
+  "carriers": {
+    "_note": "Commercial carriers never enter a weapons engagement zone (WEZ); the military may. Neither enters an area of denial. Speeds are nominal, the same 18 knots the route map uses.",
+    "commercial": {"label": "LOGCAP commercial contractor", "knots": 18},
+    "military":   {"label": "Military", "knots": 18}
+  },
+
+  "handover": {
+    "_note": "A handover port must be outside every WEZ and area of denial and rated one of these statuses for the class in cargo_capability.py. Of those, the one with the shortest military leg to the destination is used. window_nm decides when another port counts as a backup, and when a class's military leg counts as longer than the scenario's shortest.",
+    "statuses": ["confirmed", "inferred"],
+    "window_nm": 250,
+    "countries_note": "The only countries whose ports may be handover ports, unless a scenario lists its own handover_countries. An illustrative list for the demo, not a statement of any agreement. Names as in ports.csv.",
+    "countries": ["United States", "Guam", "Northern Mariana Islands", "Japan", "South Korea", "Philippines",
+                  "Australia", "Singapore", "Palau", "Federated States of Micronesia", "Marshall Islands",
+                  "Papua New Guinea"]
+  },
+
+  "manifest": {
+    "_note": "Illustrative quantities in short tons, used by every scenario that does not list its own cargo. They are for the demo, not planning factors.",
+    "I": 500,
+    "II": 200,
+    "III": 3000,
+    "IV": 1000,
+    "V": 800,
+    "VI": 50,
+    "VII": 1500,
+    "VIII": 40,
+    "IX": 300
+  }
+}

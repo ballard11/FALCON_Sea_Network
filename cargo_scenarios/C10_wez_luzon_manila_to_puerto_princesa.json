@@ -1,0 +1,15 @@
+{
+  "id": "C10",
+  "base": "S10",
+  "name": "Manila to Puerto Princesa, Mindoro Strait denied, Manila inside a WEZ",
+  "purpose": "S10's short move inside the Philippines, plus the 600 nm WEZ, which takes in Manila but not Palawan. No handover port would save the military more than 11 nm, so it carries every class the whole way. Puerto Princesa's cargo pier is too shallow for the usual ship of most classes.",
+  "wez": [
+    {"type": "circle", "center": [121.0, 23.5], "radius_nm": 600}
+  ],
+  "expect": {
+    "plan": {
+      "*": "military"
+    },
+    "bottleneck_classes": ["I", "II", "III", "VI", "VII", "VIII", "IX"]
+  }
+}

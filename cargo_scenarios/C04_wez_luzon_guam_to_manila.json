@@ -1,0 +1,24 @@
+{
+  "id": "C04",
+  "base": "S04",
+  "name": "Guam to Manila, Luzon and San Bernardino Straits denied, Manila inside a WEZ",
+  "purpose": "S04's move from the second island chain, plus the 600 nm WEZ. Commercial carriers take most classes to a handover port in the southern Philippines. For ammunition no port outside the WEZ is nearer Manila than Guam itself, so the military carries it the whole way.",
+  "wez": [
+    {"type": "circle", "center": [121.0, 23.5], "radius_nm": 600}
+  ],
+  "expect": {
+    "plan": {
+      "*": "commercial_military",
+      "V": "military"
+    },
+    "handover": {
+      "*": "Cagayan De Oro",
+      "V": null
+    },
+    "military_nm": {
+      "I": {"min": 550, "max": 750},
+      "V": {"min": 1750, "max": 2000}
+    },
+    "bottleneck_classes": ["V"]
+  }
+}

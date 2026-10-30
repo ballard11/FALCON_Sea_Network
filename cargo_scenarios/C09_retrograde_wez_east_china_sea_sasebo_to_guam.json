@@ -1,0 +1,25 @@
+{
+  "id": "C09",
+  "base": "S09",
+  "name": "Retrograde: Sasebo to Guam, Sasebo inside a WEZ",
+  "purpose": "Retrograde of damaged major end items and repairable parts, from western Kyushu back to Guam. An illustrative 450 nm WEZ over the East China Sea takes in Sasebo, so commercial carriers cannot load there. The military carries the cargo out to the nearest port outside the WEZ that can take it, and a commercial carrier takes it on to Guam.",
+  "wez": [
+    {"type": "circle", "center": [125.5, 29.5], "radius_nm": 450}
+  ],
+  "cargo": [
+    {"class": "VII", "short_tons": 1200},
+    {"class": "IX", "short_tons": 200}
+  ],
+  "expect": {
+    "plan": {
+      "*": "military_commercial"
+    },
+    "handover": {
+      "*": "Kure"
+    },
+    "military_nm": {
+      "*": {"min": 200, "max": 300}
+    },
+    "bottleneck_classes": []
+  }
+}

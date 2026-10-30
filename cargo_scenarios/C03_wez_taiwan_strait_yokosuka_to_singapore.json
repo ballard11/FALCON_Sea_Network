@@ -1,0 +1,16 @@
+{
+  "id": "C03",
+  "base": "S03",
+  "name": "Yokosuka to Singapore, Luzon Strait denied, WEZ over the Taiwan Strait",
+  "purpose": "S03's move, plus the same 600 nm WEZ. Both ends are outside it, so commercial carriers make the whole trip, but the WEZ closes the Taiwan Strait route that S03's area of denial pushed them onto. They must go around the WEZ, which costs every class the same extra distance.",
+  "wez": [
+    {"type": "circle", "center": [121.0, 23.5], "radius_nm": 600}
+  ],
+  "expect": {
+    "plan": {
+      "*": "commercial"
+    },
+    "commercial_extra_nm": {"min": 250, "max": 400},
+    "bottleneck_classes": []
+  }
+}

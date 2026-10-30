@@ -1,0 +1,24 @@
+{
+  "id": "C05",
+  "base": "S05",
+  "name": "Honolulu to Kao-Hsiung, Taiwan inside a WEZ instead of an area of denial",
+  "purpose": "S05 drew Taiwan as an area of denial, so no route was possible for anyone. Here the same waters are a WEZ instead: closed to commercial carriers but open to the military. Commercial carriers take each class to the nearest port outside the WEZ that can take it, and the military carries the last leg, most of it inside the WEZ.",
+  "areas": [],
+  "wez": [
+    {"type": "circle", "center": [121.0, 23.5], "radius_nm": 600}
+  ],
+  "expect": {
+    "plan": {
+      "*": "commercial_military"
+    },
+    "handover": {
+      "*": "Mokpo",
+      "V": "Bundaberg"
+    },
+    "military_nm": {
+      "I": {"min": 800, "max": 950},
+      "V": {"min": 3500, "max": 4000}
+    },
+    "bottleneck_classes": ["V"]
+  }
+}

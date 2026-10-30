@@ -1,0 +1,16 @@
+{
+  "id": "C07",
+  "base": "S07",
+  "name": "Diego Garcia to Yokosuka, Indonesian straits denied, WEZ over the Taiwan Strait",
+  "purpose": "S07's move, plus the 600 nm WEZ. Commercial carriers make the whole trip, a little further than S07's route. The World Port Index records almost nothing about Diego Garcia, so it cannot say whether the origin can load any class: a data gap a planner would close with an override.",
+  "wez": [
+    {"type": "circle", "center": [121.0, 23.5], "radius_nm": 600}
+  ],
+  "expect": {
+    "plan": {
+      "*": "commercial"
+    },
+    "commercial_extra_nm": {"min": 50, "max": 150},
+    "bottleneck_classes": []
+  }
+}

@@ -130,9 +130,50 @@ in the data or the routing shows up. The command exits with 1 if any check
 fails, so it can run in CI. To add a scenario, copy a file in `scenarios/`;
 [scenarios/README.md](scenarios/README.md) lists every field and expectation.
 
+## Cargo: LOGCAP commercial contractors and the military
+
+The same moves can carry cargo, one class of supply at a time (I to IX).
+Every leg is carried by a **LOGCAP commercial contractor** or by the
+**military**. Commercial contractors do not operate inside a **weapons
+engagement zone (WEZ)**: they carry each class to the nearest port outside it
+that can take that class, and the military carries it on. An area of denial
+still closes the water to everyone.
+
+```bash
+python run_cargo_scenarios.py
+```
+
+runs the ten cargo scenarios in `cargo_scenarios/`, one built on each route
+scenario, and writes a report to `reports/cargo/<date>_<time>/`: who carries
+each class, where it changes hands, how far the military carries it and how
+much of that is inside the WEZ, and the bottlenecks each class runs into. A
+`movements.csv` alongside has one row per scenario and class for planners.
+
+On the web map, choose **Cargo**, pick a scenario or your own ports, and draw
+areas as **Area of denial** or **WEZ**.
+
+| Scenario | Move | What it shows |
+|---|---|---|
+| C01 | San Diego to Subic Bay, no WEZ | Control case: commercial carries every class the whole way |
+| C02 | San Diego to Subic Bay, Subic Bay inside a WEZ | Handover on Mindanao for eight classes; ammunition hands over in Australia |
+| C03 | Yokosuka to Singapore, WEZ over the Taiwan Strait | No handover, but commercial carriers sail 315 nm further |
+| C04 | Guam to Manila, Manila inside a WEZ | Handover on Mindanao; the military carries ammunition the whole way from Guam |
+| C05 | Honolulu to Kao-Hsiung, Taiwan a WEZ instead of S05's area of denial | S05 was blocked; now commercial hands over at Mokpo and the military goes in |
+| C06 | Colombo to Yokosuka, WEZ | Commercial carriers sail 249 nm further |
+| C07 | Diego Garcia to Yokosuka, WEZ | 98 nm further; the World Port Index cannot say if Diego Garcia can load anything |
+| C08 | Singapore to Manila, Manila inside a WEZ | Container-only classes hand over further away than breakbulk classes |
+| C09 | Retrograde, Sasebo to Guam, Sasebo inside a WEZ | The military carries cargo out to Kure; commercial takes it on |
+| C10 | Manila to Puerto Princesa, Manila inside a WEZ | The military carries everything; Puerto Princesa is too shallow for most classes' usual ship |
+
+The main finding: **ammunition (Class V) is the bottleneck wherever cargo
+changes hands**, because the World Port Index confirms very few ports for it.
+That is a data gap, and the report names the nearest port a planner could
+confirm. [cargo_scenarios/README.md](cargo_scenarios/README.md) explains the
+rules, every flag, the scenario format, and each assumption with who made it.
+
 ## API
 
-`server.py` answers two requests:
+`server.py` answers these requests:
 
 - `GET /api/ports` returns every port: `id`, `name`, `country`, `lat`, `lon`, `size`.
 - `POST /api/routes` takes a JSON body and returns the routes:
@@ -155,6 +196,15 @@ with no areas), `routes` (ranked, each with `length_nm`, `passages` and the
 `line` to draw), `closed_links`, whether the areas `affected` the original
 route, `extra_nm`, and `blocked` with a reason when no route is possible.
 
+- `GET /api/cargo/meta` returns the supply classes, the carrier names, the
+  default handover countries and the cargo scenarios.
+- `POST /api/cargo` takes `from`, `to`, `areas` (areas of denial), `wez` (the
+  same shapes) and optionally `cargo` (`[{"class": "V", "short_tons": 800}]`)
+  and `handover_countries`. It returns `legs` (each with its `carrier`,
+  `length_nm`, `wez_nm` and `line`), `classes`, each with its `plan`, its
+  `handover` port, its distances and its `flags`, and `routes`: the classes
+  that travel the same legs, gathered into one, with their flags merged.
+
 ## What's here
 
 | Path | What it is |
@@ -167,6 +217,8 @@ route, `extra_nm`, and `blocked` with a reason when no route is possible.
 | `map_snapshot.py` | Draws a scenario's map as SVG (and PNG) |
 | `scenarios/` | The test scenarios, one JSON file each |
 | `cargo_capability.py`, `cargo/` | Rates each port for each class of supply. See [cargo/README.md](cargo/README.md) |
+| `cargo_movement.py` | Moves cargo through a scenario: who carries each class, and where it changes hands |
+| `run_cargo_scenarios.py`, `cargo_scenarios/` | The cargo scenarios and their report. See [cargo_scenarios/README.md](cargo_scenarios/README.md) |
 
 To use the data in Neo4j instead, follow `neo4j-datamodel/START_HERE.md`.
 `neo4j-datamodel/ASSUMPTIONS.md` lists every filter, default and known gap.

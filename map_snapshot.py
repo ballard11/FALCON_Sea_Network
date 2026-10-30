@@ -18,7 +18,7 @@ import tempfile
 import time
 from html import escape
 
-from sea_routing import NM_RADIUS, _unwrap
+from sea_routing import NM_RADIUS, _unwrap, great_circle_nm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAND = os.path.join(HERE, "web", "land-50m.json")
@@ -29,6 +29,8 @@ GRID, LANE, INK, DIM, BG = "#16283a", "#2a4357", "#e6edf3", "#8b9bab", "#11161c"
 DENY, ORIGINAL = "#e8604c", "#9aa8b6"
 ORIGIN_DOT, DEST_DOT = "#4ad4a0", "#e8604c"
 COLORS = ["#4ad4a0", "#e8b04c", "#c58bdd", "#4a9eda", "#f08a7c"]   # same as the web map
+COMMERCIAL, MILITARY, WEZ, HANDOVER = "#4a9eda", "#e8b04c", "#c58bdd", "#ffffff"   # cargo maps
+CLOSEUP_NM = 1500                        # cargo close-ups show handover ports this near the WEZ end
 
 _land = None
 _lanes = {}
@@ -159,32 +161,11 @@ def _lat_label(y):
 
 
 # ---------------------------------------------------------------- render
-def render(graph, result, areas_spec, closed, title, subtitle="", closeup=False):
-    """SVG of one scenario. result is the server's /api/routes answer,
-    areas_spec the scenario's areas, closed the link ids the areas close.
-    closeup zooms in on the areas of denial, or on the destination if
-    there are none, instead of fitting the whole route."""
-    routes = result.get("routes", [])
-    origin, goal = graph.coords[result["from"]], graph.coords[result["to"]]
-    ref = origin[0]
-    route_lines = [_continuous(r["line"], ref) for r in routes]
-    orig_line = _continuous(result["original"]["line"], ref) if result.get("original") else []
-    drawn = route_lines or ([orig_line] if orig_line else [[origin, goal]])
-    mid = sum(_xbounds(line)[0] + _xbounds(line)[1] for line in drawn) / (2 * len(drawn))
-
-    area_rings = []
-    for a in areas_spec:
-        ring = circle_points(a["center"], a["radius_nm"]) if a["type"] == "circle" else a["points"]
-        area_rings.append(_continuous(ring, mid))
-    fit_lines = drawn + ([orig_line] if orig_line else []) + area_rings
-    if closeup and area_rings:
-        view = fit_view(area_rings, pad=0.9, min_span=16.0)
-    elif closeup:
-        g = (_unwrap(goal[0], mid), goal[1])
-        view = fit_view([[(g[0] - 9, g[1] - 5), (g[0] + 9, g[1] + 5)]], pad=0.0)
-    else:
-        view = fit_view(fit_lines, [(_unwrap(origin[0], mid), origin[1]), (_unwrap(goal[0], mid), goal[1])])
-    c = _Canvas(view)
+def _base(c, graph, closed):
+    """The svg's opening tag and the layers under everything: ocean, graticule,
+    land, the shipping lanes faint, and the lanes in `closed` in red.
+    Returns the closed lanes it drew (port connectors left out)."""
+    view = c.view
     c.add('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" '
           'font-family="Segoe UI, system-ui, -apple-system, sans-serif">' % (WIDTH, HEIGHT, WIDTH, HEIGHT))
     c.add('<rect width="%d" height="%d" fill="%s"/>' % (WIDTH, HEIGHT, OCEAN))
@@ -234,13 +215,93 @@ def render(graph, result, areas_spec, closed, title, subtitle="", closeup=False)
         c.add('<path d="%s" stroke="%s" stroke-width="2.2" stroke-opacity="0.9" fill="none"/>'
               % (lanes(closed), DENY))
     c.add('<g fill="%s" font-size="12">%s</g>' % (DIM, "".join(labels)))
+    return closed
+
+
+def _area(c, ring, colour, dash="6 4"):
+    x0, x1 = _xbounds(ring)
+    for o in _offsets(x0, x1, c.view):
+        c.add('<path d="%s" fill="%s" fill-opacity="0.14" stroke="%s" stroke-width="1.6" '
+              'stroke-dasharray="%s"/>' % (c.d(ring, o, close=True), colour, colour, dash))
+
+
+def _dot(c, p, colour, name, r=7):
+    """A port: a dot and its name. p is in the view's continuous degrees."""
+    X, Y = c.xy(p)
+    c.add('<circle cx="%.1f" cy="%.1f" r="%g" fill="%s" stroke="%s" stroke-width="2.5"/>' % (X, Y, r, colour, BG))
+    anchor, dx = ("end", -12) if X > WIDTH - 220 else ("start", 12)
+    c.add('<text x="%.1f" y="%.1f" text-anchor="%s" font-size="16" font-weight="600" fill="%s" '
+          'stroke="%s" stroke-width="4" paint-order="stroke">%s</text>'
+          % (X + dx, Y + 5, anchor, INK, BG, escape(name)))
+
+
+def _diamond(c, X, Y, colour, r=8):
+    c.add('<path d="M%.1f %.1fl%g %gl%g %gl%g %gZ" fill="%s" stroke="%s" stroke-width="2.5"/>'
+          % (X, Y - r, r, r, -r, r, -r, -r, colour, BG))
+
+
+def _title(c, title, subtitle):
+    c.add('<rect x="14" y="14" width="%d" height="%d" rx="8" fill="%s" fill-opacity="0.88"/>'
+          % (min(WIDTH - 28, 22 + 10.5 * max(len(title), len(subtitle) * 0.8)), 62 if subtitle else 40, BG))
+    c.add('<text x="28" y="41" font-size="19" font-weight="700" fill="%s">%s</text>' % (INK, escape(title)))
+    if subtitle:
+        c.add('<text x="28" y="64" font-size="13.5" fill="%s">%s</text>' % (DIM, escape(subtitle)))
+
+
+def _legend(c, rows):
+    """The key, bottom left. rows are (kind, colour, text); kind is line,
+    dash, area or text."""
+    if rows:
+        lh, top = 24, HEIGHT - 34 - 24 * len(rows)
+        wid = min(WIDTH - 28, 70 + 7.6 * max(len(t) for _, _, t in rows))
+        c.add('<rect x="14" y="%d" width="%d" height="%d" rx="8" fill="%s" fill-opacity="0.88"/>'
+              % (top - 14, wid, lh * len(rows) + 16, BG))
+        for i, (kind, colour, text) in enumerate(rows):
+            y = top + i * lh
+            if kind == "line":
+                c.add('<path d="M28 %dh32" stroke="%s" stroke-width="4" stroke-linecap="round"/>' % (y + 4, colour))
+            elif kind == "dash":
+                c.add('<path d="M28 %dh32" stroke="%s" stroke-width="2.4" stroke-dasharray="7 5"/>' % (y + 4, colour))
+            elif kind == "area":
+                c.add('<rect x="30" y="%d" width="28" height="14" fill="%s" fill-opacity="0.25" stroke="%s" '
+                      'stroke-dasharray="4 3"/>' % (y - 3, colour, colour))
+            elif kind == "mark":
+                _diamond(c, 44, y + 4, colour)
+            c.add('<text x="%d" y="%d" font-size="14" fill="%s">%s</text>'
+                  % (28 if kind == "text" else 72, y + 9, colour if kind == "text" else INK, escape(text)))
+
+
+def render(graph, result, areas_spec, closed, title, subtitle="", closeup=False):
+    """SVG of one scenario. result is the server's /api/routes answer,
+    areas_spec the scenario's areas, closed the link ids the areas close.
+    closeup zooms in on the areas of denial, or on the destination if
+    there are none, instead of fitting the whole route."""
+    routes = result.get("routes", [])
+    origin, goal = graph.coords[result["from"]], graph.coords[result["to"]]
+    ref = origin[0]
+    route_lines = [_continuous(r["line"], ref) for r in routes]
+    orig_line = _continuous(result["original"]["line"], ref) if result.get("original") else []
+    drawn = route_lines or ([orig_line] if orig_line else [[origin, goal]])
+    mid = sum(_xbounds(line)[0] + _xbounds(line)[1] for line in drawn) / (2 * len(drawn))
+
+    area_rings = []
+    for a in areas_spec:
+        ring = circle_points(a["center"], a["radius_nm"]) if a["type"] == "circle" else a["points"]
+        area_rings.append(_continuous(ring, mid))
+    fit_lines = drawn + ([orig_line] if orig_line else []) + area_rings
+    if closeup and area_rings:
+        view = fit_view(area_rings, pad=0.9, min_span=16.0)
+    elif closeup:
+        g = (_unwrap(goal[0], mid), goal[1])
+        view = fit_view([[(g[0] - 9, g[1] - 5), (g[0] + 9, g[1] + 5)]], pad=0.0)
+    else:
+        view = fit_view(fit_lines, [(_unwrap(origin[0], mid), origin[1]), (_unwrap(goal[0], mid), goal[1])])
+    c = _Canvas(view)
+    closed = _base(c, graph, closed)
 
     # denial areas
     for ring in area_rings:
-        x0, x1 = _xbounds(ring)
-        for o in _offsets(x0, x1, view):
-            c.add('<path d="%s" fill="%s" fill-opacity="0.14" stroke="%s" stroke-width="1.6" '
-                  'stroke-dasharray="6 4"/>' % (c.d(ring, o, close=True), DENY, DENY))
+        _area(c, ring, DENY)
 
     # the original route (no areas), dashed, when the areas moved it
     show_original = bool(areas_spec) and orig_line and (result.get("affected") or not routes)
@@ -256,19 +317,8 @@ def render(graph, result, areas_spec, closed, title, subtitle="", closeup=False)
 
     # origin and destination
     for p, colour, name in ((origin, ORIGIN_DOT, result["from_name"]), (goal, DEST_DOT, result["to_name"])):
-        X, Y = c.xy((_unwrap(p[0], mid), p[1]))
-        c.add('<circle cx="%.1f" cy="%.1f" r="7" fill="%s" stroke="%s" stroke-width="2.5"/>' % (X, Y, colour, BG))
-        anchor, dx = ("end", -12) if X > WIDTH - 220 else ("start", 12)
-        c.add('<text x="%.1f" y="%.1f" text-anchor="%s" font-size="16" font-weight="600" fill="%s" '
-              'stroke="%s" stroke-width="4" paint-order="stroke">%s</text>'
-              % (X + dx, Y + 5, anchor, INK, BG, escape(name)))
-
-    # title and legend
-    c.add('<rect x="14" y="14" width="%d" height="%d" rx="8" fill="%s" fill-opacity="0.88"/>'
-          % (min(WIDTH - 28, 22 + 10.5 * max(len(title), len(subtitle) * 0.8)), 62 if subtitle else 40, BG))
-    c.add('<text x="28" y="41" font-size="19" font-weight="700" fill="%s">%s</text>' % (INK, escape(title)))
-    if subtitle:
-        c.add('<text x="28" y="64" font-size="13.5" fill="%s">%s</text>' % (DIM, escape(subtitle)))
+        _dot(c, (_unwrap(p[0], mid), p[1]), colour, name)
+    _title(c, title, subtitle)
 
     rows = []
     for r in routes:
@@ -284,22 +334,86 @@ def render(graph, result, areas_spec, closed, title, subtitle="", closeup=False)
             rows.append(("line", DENY, "Lanes closed by the areas"))
     if result.get("blocked"):
         rows.append(("text", DENY, "Blocked: " + result["blocked"]))
-    if rows:
-        lh, top = 24, HEIGHT - 34 - 24 * len(rows)
-        wid = min(WIDTH - 28, 70 + 7.6 * max(len(t) for _, _, t in rows))
-        c.add('<rect x="14" y="%d" width="%d" height="%d" rx="8" fill="%s" fill-opacity="0.88"/>'
-              % (top - 14, wid, lh * len(rows) + 16, BG))
-        for i, (kind, colour, text) in enumerate(rows):
-            y = top + i * lh
-            if kind == "line":
-                c.add('<path d="M28 %dh32" stroke="%s" stroke-width="4" stroke-linecap="round"/>' % (y + 4, colour))
-            elif kind == "dash":
-                c.add('<path d="M28 %dh32" stroke="%s" stroke-width="2.4" stroke-dasharray="7 5"/>' % (y + 4, colour))
-            elif kind == "area":
-                c.add('<rect x="30" y="%d" width="28" height="14" fill="%s" fill-opacity="0.25" stroke="%s" '
-                      'stroke-dasharray="4 3"/>' % (y - 3, colour, colour))
-            c.add('<text x="%d" y="%d" font-size="14" fill="%s">%s</text>'
-                  % (28 if kind == "text" else 72, y + 9, colour if kind == "text" else INK, escape(text)))
+    _legend(c, rows)
+    c.add("</svg>")
+    return "\n".join(c.parts)
+
+
+def render_cargo(graph, plan, denial_spec, wez_spec, closed, title, subtitle="", closeup=False):
+    """SVG of one cargo scenario. plan is CargoPlanner.plan()'s answer,
+    denial_spec and wez_spec the scenario's areas, closed the link ids the
+    areas of denial close. Commercial legs are blue and military legs amber;
+    each handover port is a white diamond labelled with the classes that
+    change hands there. closeup zooms in on the WEZs and handover ports."""
+    origin, goal = graph.coords[plan["origin"]], graph.coords[plan["goal"]]
+    ref = origin[0]
+    legs = [(leg, _continuous(leg["line"], ref)) for leg in plan.get("legs", [])]
+    drawn = [line for _, line in legs] or [_continuous([origin, goal], ref)]
+    mid = sum(_xbounds(line)[0] + _xbounds(line)[1] for line in drawn) / (2 * len(drawn))
+
+    def rings(spec):
+        return [_continuous(circle_points(a["center"], a["radius_nm"]) if a["type"] == "circle" else a["points"], mid)
+                for a in spec]
+    den_rings, wez_rings = rings(denial_spec), rings(wez_spec)
+    handovers = {}
+    for cls in plan["classes"]:
+        if cls.get("handover"):
+            handovers.setdefault(cls["handover"]["id"], []).append(cls["class"])
+    here = lambda pid: (_unwrap(graph.coords[pid][0], mid), graph.coords[pid][1])
+    marks = [here(pid) for pid in handovers]
+    ends = [here(plan["origin"]), here(plan["goal"])]
+    if closeup and (wez_rings or den_rings):
+        # Only handover ports near the WEZ end, so one far-off port can't undo the zoom.
+        near = graph.coords[plan["origin"] if plan.get("handover_side") == "outbound" else plan["goal"]]
+        close = [here(pid) for pid in handovers if great_circle_nm(graph.coords[pid], near) <= CLOSEUP_NM]
+        view = fit_view(wez_rings or den_rings, close, pad=0.25, min_span=16.0)
+    elif closeup:
+        g = ends[1]
+        view = fit_view([[(g[0] - 9, g[1] - 5), (g[0] + 9, g[1] + 5)]], pad=0.0)
+    else:
+        view = fit_view(drawn + wez_rings + den_rings, ends + marks)
+    c = _Canvas(view)
+    closed = _base(c, graph, closed)
+    for ring in wez_rings:
+        _area(c, ring, WEZ, dash="10 4")
+    for ring in den_rings:
+        _area(c, ring, DENY)
+
+    # commercial legs, then military legs on top
+    for carrier, colour in (("commercial", COMMERCIAL), ("military", MILITARY)):
+        for leg, line in legs:
+            if leg["carrier"] == carrier:
+                c.add('<path d="%s" fill="none" stroke="%s" stroke-width="4" stroke-linecap="round" '
+                      'stroke-linejoin="round" stroke-opacity="0.95"/>' % (c.d(line), colour))
+
+    _dot(c, ends[0], ORIGIN_DOT, plan["origin_name"])
+    _dot(c, ends[1], DEST_DOT, plan["goal_name"])
+    for pid, classes in handovers.items():
+        X, Y = c.xy(here(pid))
+        _diamond(c, X, Y, HANDOVER)
+        anchor, dx = ("end", -14) if X > WIDTH - 260 else ("start", 14)
+        c.add('<text x="%.1f" y="%.1f" text-anchor="%s" font-size="15" font-weight="600" fill="%s" stroke="%s" '
+              'stroke-width="4" paint-order="stroke">%s  ·  %s</text>' % (
+                  X + dx, Y + 5, anchor, INK, BG, escape(graph.ports[pid]["name"]), escape(" ".join(classes))))
+    _title(c, title, subtitle)
+
+    rows = []
+    for leg, _ in legs:
+        rows.append(("line", COMMERCIAL if leg["carrier"] == "commercial" else MILITARY, "%s  %s → %s  %s nm%s" % (
+            "Commercial" if leg["carrier"] == "commercial" else "Military", leg["from_name"], leg["to_name"],
+            format(round(leg["length_nm"]), ","),
+            ", %s in WEZ" % format(round(leg["wez_nm"]), ",") if leg["wez_nm"] >= 1 else "")))
+    if handovers:
+        rows.append(("mark", HANDOVER, "Handover port, with the classes that change hands there"))
+    if wez_spec:
+        rows.append(("area", WEZ, "Weapons engagement zone: commercial carriers stay out"))
+    if denial_spec:
+        rows.append(("area", DENY, "Area of denial: closed to every carrier"))
+        if closed:
+            rows.append(("line", DENY, "Lanes closed by the areas of denial"))
+    if plan.get("blocked"):
+        rows.append(("text", DENY, "Blocked: " + plan["blocked"]))
+    _legend(c, rows)
     c.add("</svg>")
     return "\n".join(c.parts)
 

@@ -1,0 +1,23 @@
+{
+  "id": "C02",
+  "base": "S02",
+  "name": "San Diego to Subic Bay, San Bernardino Strait denied, Subic Bay inside a WEZ",
+  "purpose": "S02's move, plus an illustrative WEZ: a 600 nm circle centred on the Taiwan Strait that takes in Luzon as far south as Manila and Batangas. Commercial carriers cannot enter it, so each class changes hands at the nearest port outside it that can take that class, and the military carries it in. The area of denial over the San Bernardino Strait also covers Cebu, so the handover moves to Mindanao.",
+  "wez": [
+    {"type": "circle", "center": [121.0, 23.5], "radius_nm": 600}
+  ],
+  "expect": {
+    "plan": {
+      "*": "commercial_military"
+    },
+    "handover": {
+      "*": "Cagayan De Oro",
+      "V": "Bundaberg"
+    },
+    "military_nm": {
+      "I": {"min": 550, "max": 750},
+      "V": {"min": 3000, "max": 3500}
+    },
+    "bottleneck_classes": ["V"]
+  }
+}

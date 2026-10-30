@@ -150,20 +150,25 @@ def rate(port, cls, rules):
     }
 
 
-def main():
+def rate_all(overrides=True):
+    """Every port rated for every class: (rules, ports, rows, overrides applied)."""
     with open(RULES, encoding="utf-8") as f:
         rules = json.load(f)
     ports = load_ports()
-    # --no-overrides rates from the World Port Index alone and writes nothing,
-    # to show what the overrides change.
-    no_overrides = "--no-overrides" in sys.argv[1:]
-    n_overrides = 0 if no_overrides else apply_overrides(ports)
-
+    n_overrides = apply_overrides(ports) if overrides else 0
     rows = []
     for pid, port in ports.items():
         for cid, cls in rules["classes"].items():
             rows.append({"port_id": pid, "name": port["name"], "harbor_size": port["harbor_size"],
                          "class_id": cid, "class_name": cls["name"], **rate(port, cls, rules)})
+    return rules, ports, rows, n_overrides
+
+
+def main():
+    # --no-overrides rates from the World Port Index alone and writes nothing,
+    # to show what the overrides change.
+    no_overrides = "--no-overrides" in sys.argv[1:]
+    rules, ports, rows, n_overrides = rate_all(overrides=not no_overrides)
 
     if not no_overrides:
         cols = list(rows[0])

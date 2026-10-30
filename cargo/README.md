@@ -16,6 +16,7 @@ summary. It takes about a second and needs only the Python standard library.
 | `cargo_classes.json` | What each class needs: required fields, the typical ship, how gaps are inferred | Yes, to change the rules |
 | `port_overrides.csv` | Sourced corrections for key ports. These win over the World Port Index | Yes, to add a port or fact |
 | `port_cargo_capability.csv` | The ratings | No, it is regenerated |
+| `movement_rules.json` | Carriers, the handover rule, handover countries and the default cargo, for `cargo_movement.py` | Yes, to change how cargo moves |
 
 ## How a port is rated
 
@@ -70,15 +71,15 @@ onward movement.
 
 | Class | Confirmed | Inferred | Unknown | Ruled out |
 |---|---|---|---|---|
-| I Subsistence | 113 | 232 | 55 | 150 |
-| II Clothing and equipment | 113 | 232 | 55 | 150 |
-| III Petroleum | 109 | 255 | 36 | 150 |
-| IV Construction material | 138 | 229 | 101 | 82 |
-| V Ammunition | 15 | 0 | 448 | 87 |
-| VI Personal demand items | 104 | 231 | 57 | 158 |
-| VII Major end items | 193 | 164 | 62 | 131 |
-| VIII Medical supplies | 104 | 231 | 57 | 158 |
-| IX Repair parts | 104 | 231 | 57 | 158 |
+| I Subsistence | 113 | 233 | 55 | 149 |
+| II Clothing and equipment | 113 | 233 | 55 | 149 |
+| III Petroleum | 109 | 256 | 36 | 149 |
+| IV Construction material | 138 | 230 | 101 | 81 |
+| V Ammunition | 15 | 0 | 449 | 86 |
+| VI Personal demand items | 104 | 232 | 57 | 157 |
+| VII Major end items | 193 | 165 | 62 | 130 |
+| VIII Medical supplies | 104 | 232 | 57 | 157 |
+| IX Repair parts | 104 | 232 | 57 | 157 |
 
 ## Overrides
 
@@ -87,12 +88,23 @@ onward movement.
 `checked_by` (who checked it, and how) and `note`. The script stops if a port or field name is wrong. Each rating lists
 any overridden fields it used, in its `overridden` column.
 
-The 12 overrides so far cover Apra Harbor, Manila, Subic Bay, Naha, Busan,
-Keppel (Singapore) and Yokosuka. They come from port authority, operator and
-trade press pages found by Claude on 30 October 2026. For 11 of them Claude read
-only the search engine's summary, not the page itself, as `checked_by` records;
-a person should open each link before the demo. The Yokosuka Ro-Ro entry rests
-on a secondary source and should be confirmed. Diego Garcia, Sasebo,
+The 13 overrides so far cover Apra Harbor, Manila, Subic Bay, Naha, Busan,
+Keppel (Singapore), Yokosuka and Honolulu. They come from port authority,
+operator, trade press and port-listing pages found by Claude on 30 October
+2026. For 11 of them Claude read only the search engine's summary, not the page
+itself, as `checked_by` records; a person should open each link before the
+demo. The Yokosuka Ro-Ro entry rests on a secondary source and should be
+confirmed. The Honolulu cargo pier depth (11.0 m, where the World Port Index
+has 6.4 m) comes from a third-party port listing that gives no source or date;
+confirm it with Hawaii DOT Harbors. Diego Garcia, Sasebo,
 Kao-Hsiung and Darwin were not researched and use the World Port Index alone.
 
 To add one, copy a row, fill in a source link, and rerun the script.
+
+## Moving cargo
+
+`cargo_movement.py` uses these ratings to move cargo through a scenario:
+which ports can be handover ports between a LOGCAP commercial contractor and
+the military, for each class. See
+[cargo_scenarios/README.md](../cargo_scenarios/README.md). Its rules are in
+`movement_rules.json`.

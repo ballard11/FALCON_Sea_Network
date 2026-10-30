@@ -11,8 +11,14 @@ Python 3, stdlib only. All routing lives in sea_routing.py.
                                "method": "yen" | "distinct",
                                "areas": [{"type": "circle", "center": [lon, lat], "radius_nm": r},
                                          {"type": "polygon", "points": [[lon, lat], ...]}]}
+    GET  /api/cargo/meta      supply classes, carriers, handover countries, cargo scenarios
+    POST /api/cargo           {"from": port_id, "to": port_id, "areas": [...], "wez": [...],
+                               "cargo": [{"class": "I", "short_tons": 500}, ...]}
+                              areas of denial close the water to everyone, a WEZ to
+                              commercial carriers only; see cargo_movement.py
 """
 import csv
+import glob
 import json
 import math
 import os
@@ -21,6 +27,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from cargo_movement import CargoPlanner
 from sea_routing import DenialArea, SeaGraph
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -38,6 +45,7 @@ GRAPH.links_in_areas([])    # build the area index now, not on the first request
 LOCK = threading.Lock()     # the graph's lazy caches aren't built for concurrent first use
 with open(os.path.join(HERE, "neo4j-datamodel", "nodes", "passages.csv"), encoding="utf-8") as f:
     PASSAGE_NAMES = {r["passage_id"]: r["name"] for r in csv.DictReader(f)}
+PLANNER = CargoPlanner(GRAPH)
 PORT_LIST = sorted(({"id": pid, "name": p["name"], "country": p["country"] or "",
                      "lat": float(p["lat"]), "lon": float(p["lon"]), "size": p["harbor_size"] or ""}
                     for pid, p in GRAPH.ports.items()), key=lambda p: (p["name"], p["country"]))
@@ -126,6 +134,71 @@ def find_routes(body):
     return result
 
 
+def find_cargo(body):
+    origin, goal = body.get("from"), body.get("to")
+    if origin not in GRAPH.ports or goal not in GRAPH.ports:
+        raise BadRequest("Unknown origin or destination port.")
+    if origin == goal:
+        raise BadRequest("Origin and destination are the same port.")
+    denial, wez = parse_areas(body.get("areas")), parse_areas(body.get("wez"))
+    cargo = body.get("cargo")
+    if cargo is not None:
+        if not isinstance(cargo, list) or not 1 <= len(cargo) <= 20:
+            raise BadRequest("Cargo must be a list of 1 to 20 items.")
+        for item in cargo:
+            tons = item.get("short_tons") if isinstance(item, dict) else None
+            if not isinstance(item, dict) or item.get("class") not in PLANNER.classes:
+                raise BadRequest("Each cargo item needs a class: " + ", ".join(PLANNER.classes) + ".")
+            if tons is not None and not (isinstance(tons, (int, float)) and 0 <= tons <= 1e7):
+                raise BadRequest("short_tons must be a number from 0 to 10,000,000.")
+        cargo = [{"class": i["class"], "short_tons": i.get("short_tons")} for i in cargo]
+    countries = body.get("handover_countries")
+    if countries is not None and not (isinstance(countries, list) and len(countries) <= 100
+                                      and all(isinstance(c, str) for c in countries)):
+        raise BadRequest("handover_countries must be a list of country names.")
+    started = time.perf_counter()
+    with LOCK:
+        plan = PLANNER.plan(origin, goal, cargo, denial, wez, countries)
+    plan["ms"] = round((time.perf_counter() - started) * 1000)
+    return plan
+
+
+def cargo_scenarios():
+    """The files in cargo_scenarios/, filled in from their base scenarios,
+    with port names turned into ids, for the map's scenario list."""
+    def port_id(ref):
+        if ref in GRAPH.ports:
+            return ref
+        hits = [pid for pid, p in GRAPH.ports.items() if p["name"].lower() == str(ref).lower()]
+        return hits[0] if len(hits) == 1 else None
+    bases = {}
+    for path in glob.glob(os.path.join(HERE, "scenarios", "*.json")):
+        with open(path, encoding="utf-8") as f:
+            b = json.load(f)
+        bases[b["id"]] = b
+    out = []
+    for path in sorted(glob.glob(os.path.join(HERE, "cargo_scenarios", "*.json"))):
+        with open(path, encoding="utf-8") as f:
+            s = json.load(f)
+        base = bases.get(s.get("base"), {})
+        frm, to = port_id(s.get("from", base.get("from"))), port_id(s.get("to", base.get("to")))
+        if frm and to:
+            out.append({"id": s["id"], "name": s["name"], "purpose": s.get("purpose", ""), "from": frm, "to": to,
+                        "areas": s.get("areas", base.get("areas", [])), "wez": s.get("wez", []),
+                        "cargo": s.get("cargo") or PLANNER.default_cargo()})
+    return out
+
+
+CARGO_META = {
+    "classes": [{"id": cid, "name": c["name"], "moves_as": c["moves_as"],
+                 "short_tons": PLANNER.rules["manifest"].get(cid)} for cid, c in PLANNER.classes.items()],
+    "carriers": {k: v["label"] for k, v in PLANNER.rules["carriers"].items() if not k.startswith("_")},
+    "handover_countries": PLANNER.rules["handover"]["countries"],
+    "window_nm": PLANNER.rules["handover"]["window_nm"],
+    "scenarios": cargo_scenarios(),
+}
+
+
 JS = "application/javascript"
 STATIC = {"/": ("web/index.html", "text/html; charset=utf-8"),
           "/index.html": ("web/index.html", "text/html; charset=utf-8"),
@@ -157,6 +230,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path == "/api/ports":
             return self.send_json(200, PORT_LIST)
+        if path == "/api/cargo/meta":
+            return self.send_json(200, CARGO_META)
         if path in STATIC:
             name, ctype = STATIC[path]
             with open(os.path.join(HERE, name), "rb") as f:
@@ -164,7 +239,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, "not found", "text/plain")
 
     def do_POST(self):
-        if urllib.parse.urlparse(self.path).path != "/api/routes":
+        handler = {"/api/routes": find_routes, "/api/cargo": find_cargo}.get(urllib.parse.urlparse(self.path).path)
+        if handler is None:
             return self.send(404, "not found", "text/plain")
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -173,7 +249,7 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise BadRequest("Request body must be a JSON object.")
-            self.send_json(200, find_routes(body))
+            self.send_json(200, handler(body))
         except (BadRequest, ValueError) as e:
             self.send_json(400, {"error": str(e)})
         except Exception as e:

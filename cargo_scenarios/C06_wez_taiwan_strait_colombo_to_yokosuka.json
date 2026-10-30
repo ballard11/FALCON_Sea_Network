@@ -1,0 +1,16 @@
+{
+  "id": "C06",
+  "base": "S06",
+  "name": "Colombo to Yokosuka, Strait of Malacca denied, WEZ over the Taiwan Strait",
+  "purpose": "S06's move from the Indian Ocean, plus the 600 nm WEZ. Both ends are outside it, so commercial carriers make the whole trip, but their route north from the Sunda Strait must keep clear of the WEZ.",
+  "wez": [
+    {"type": "circle", "center": [121.0, 23.5], "radius_nm": 600}
+  ],
+  "expect": {
+    "plan": {
+      "*": "commercial"
+    },
+    "commercial_extra_nm": {"min": 200, "max": 300},
+    "bottleneck_classes": []
+  }
+}

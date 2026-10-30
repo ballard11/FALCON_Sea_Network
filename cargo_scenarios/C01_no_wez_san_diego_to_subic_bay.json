@@ -1,0 +1,13 @@
+{
+  "id": "C01",
+  "base": "S01",
+  "name": "San Diego to Subic Bay, no WEZ",
+  "purpose": "The control case: S01's move with all nine classes of supply and no WEZ. A LOGCAP commercial contractor carries every class the whole way. Anything flagged here comes from the ports themselves, not from the WEZ.",
+  "wez": [],
+  "expect": {
+    "plan": {
+      "*": "commercial"
+    },
+    "bottleneck_classes": []
+  }
+}

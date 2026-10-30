@@ -267,6 +267,20 @@ class SeaGraph:
                     heapq.heappush(heap, (nd, m))
         return tree
 
+    def port_distances(self, source, closed=frozenset()):
+        """Sea distance from source to every port it can reach, with no other
+        port as a waypoint: {port id: nm}. One search, however many ports."""
+        tree = self._tree(source, (source,), closed)
+        out = {}
+        for pid in self.ports:
+            best = tree[pid][0] if pid in tree else math.inf
+            for m, eid in self.adj[pid]:
+                if eid not in closed and m in tree:
+                    best = min(best, tree[m][0] + self.edges[eid][2])
+            if best < math.inf:
+                out[pid] = best
+        return out
+
     @staticmethod
     def _walk(tree, n):
         """Nodes and edges from n back to the tree's source."""

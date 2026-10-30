@@ -1,0 +1,28 @@
+{
+  "id": "C08",
+  "base": "S08",
+  "name": "Singapore to Manila, central South China Sea denied, Manila inside a WEZ",
+  "purpose": "S08's move, plus the 600 nm WEZ. Commercial carriers go around Borneo and hand over in the central or southern Philippines. Classes that can move as breakbulk hand over at Cebu South Port, which the World Port Index records as handling breakbulk. Container-only classes and major end items go on to Cagayan de Oro, 45 nm further from Manila, because the index says nothing about containers, Ro-Ro or heavy lift at Cebu South Port. For ammunition, no handover port is nearer Manila than Singapore itself.",
+  "wez": [
+    {"type": "circle", "center": [121.0, 23.5], "radius_nm": 600}
+  ],
+  "expect": {
+    "plan": {
+      "*": "commercial_military",
+      "V": "military"
+    },
+    "handover": {
+      "*": "Cagayan De Oro",
+      "I": "Cebu South Port (CSPIC)",
+      "II": "Cebu South Port (CSPIC)",
+      "III": "Cebu",
+      "IV": "Cebu South Port (CSPIC)",
+      "V": null
+    },
+    "military_nm": {
+      "I": {"min": 550, "max": 700},
+      "VI": {"min": 600, "max": 750}
+    },
+    "bottleneck_classes": ["V"]
+  }
+}
