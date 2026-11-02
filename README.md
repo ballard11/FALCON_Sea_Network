@@ -155,10 +155,28 @@ with no areas), `routes` (ranked, each with `length_nm`, `passages` and the
 `line` to draw), `closed_links`, whether the areas `affected` the original
 route, `extra_nm`, and `blocked` with a reason when no route is possible.
 
+The full contract, with every rule and error, is in `docs/API.md`.
+
+## Migrating it
+
+**Moving this to other infrastructure? Start with [MIGRATION.md](MIGRATION.md).**
+It covers the exact rules (`docs/ROUTING_RULES.md`), the API (`docs/API.md`),
+and the acceptance test that checks any server gives the same answers:
+
+```bash
+python acceptance/check_server.py http://localhost:8100
+```
+
 ## What's here
 
 | Path | What it is |
 |---|---|
+| `MIGRATION.md` | For whoever moves this to other infrastructure: start here |
+| `docs/ROUTING_RULES.md`, `docs/API.md` | The exact routing rules and the API contract |
+| `acceptance/` | The acceptance test: reference answers, checked against any server over HTTP |
+| `validate_data.py` | Checks the data model; the server runs it at start-up and refuses bad data |
+| `tests/` | Unit tests: the data checks, the rebuild, and the reference answers (`python -m unittest discover tests`) |
+| `tools/datamodel/build.py`, `data/` | Rebuilds `neo4j-datamodel/` from the public sources. See `data/README.md` |
 | `neo4j-datamodel/` | The data, ready to load into Neo4j. Start with `START_HERE.md`. |
 | `sea_routing.py` | Shortest path (A*), Yen's K shortest, and distinct corridors |
 | `server.py` | A small web server for the map |

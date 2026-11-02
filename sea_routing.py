@@ -19,6 +19,8 @@ import math
 import os
 from collections import defaultdict
 
+import validate_data
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "neo4j-datamodel")
 NM_RADIUS = 6371.0088 / 1.852        # Earth's mean radius in nm, as the build used
@@ -165,6 +167,9 @@ class SeaGraph:
 
     @classmethod
     def load(cls, data_dir=DATA):
+        """Raises validate_data.DataError, listing every problem, if the data
+        model fails its checks."""
+        validate_data.check(data_dir)
         g = cls()
         with open(os.path.join(data_dir, "nodes", "ports.csv"), encoding="utf-8") as f:
             for r in csv.DictReader(f):

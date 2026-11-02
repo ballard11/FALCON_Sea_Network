@@ -22,6 +22,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from sea_routing import DenialArea, SeaGraph
+from validate_data import DataError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("SEA_NETWORK_PORT", "8100"))
@@ -33,7 +34,10 @@ MAX_BODY_BYTES = 1_000_000
 NOMINAL_KNOTS = 18          # only to turn extra distance into rough days
 
 print("loading sea network ...")
-GRAPH = SeaGraph.load()
+try:
+    GRAPH = SeaGraph.load()
+except DataError as e:
+    raise SystemExit("Not starting: %s\nFix the rows above, or rebuild the data (see MIGRATION.md)." % e)
 GRAPH.links_in_areas([])    # build the area index now, not on the first request
 LOCK = threading.Lock()     # the graph's lazy caches aren't built for concurrent first use
 with open(os.path.join(HERE, "neo4j-datamodel", "nodes", "passages.csv"), encoding="utf-8") as f:
