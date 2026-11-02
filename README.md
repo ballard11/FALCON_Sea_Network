@@ -152,6 +152,18 @@ much of that is inside the WEZ, and the bottlenecks each class runs into. A
 On the web map, choose **Cargo**, pick a scenario or your own ports, and draw
 areas as **Area of denial** or **WEZ**.
 
+**Economic or urgent.** Each class has a priority (on the map, **Economic
+(cheapest)** or **Urgent (fastest)**; `priority` in a scenario, for all the
+cargo or one item). Economic cargo goes by sea. Urgent cargo takes the soonest
+way it may: sea, air (commercial freighters to the nearest airfield outside
+the WEZ, then military airlift in, with refuelling stops where a flight is too
+long or would cross a closed area), or **air, then sea** when no flight
+reaches the destination: it flies to the airfield nearest a port close to the
+destination and goes on by sea from there. The results show door-to-door days
+for sea and for air, and the sorties it takes. There is no cost model yet, so
+"cheapest" means by sea, and the sortie count is the cost of flying. Aircraft
+figures and their sources are in `cargo/air_rules.json`.
+
 | Scenario | Move | What it shows |
 |---|---|---|
 | C01 | San Diego to Subic Bay, no WEZ | Control case: commercial carries every class the whole way |
@@ -164,6 +176,9 @@ areas as **Area of denial** or **WEZ**.
 | C08 | Singapore to Manila, Manila inside a WEZ | Container-only classes hand over further away than breakbulk classes |
 | C09 | Retrograde, Sasebo to Guam, Sasebo inside a WEZ | The military carries cargo out to Kure; commercial takes it on |
 | C10 | Manila to Puerto Princesa, Manila inside a WEZ | The military carries everything; Puerto Princesa is too shallow for most classes' usual ship |
+| C11 | Honolulu to Kao-Hsiung, WEZ, everything urgent | Six classes fly via Jeju; ammunition and major end items fly on military aircraft via Wake and Iwo Jima; fuel cannot fly and is a bottleneck |
+| C12 | Jacksonville to San Juan, base camp package urgent | The camp package flies by commercial freighter; food and fuel are economic and follow by sea |
+| C13 | Guam to Rabaul, everything urgent, no airfield at Rabaul | Six classes fly to Port Moresby, then by military airlift to Lae's airfield, and go on to Rabaul by sea: 3.8 days instead of 5.4 |
 
 The main finding: **ammunition (Class V) is the bottleneck wherever cargo
 changes hands**, because the World Port Index confirms very few ports for it.
@@ -200,7 +215,8 @@ route, `extra_nm`, and `blocked` with a reason when no route is possible.
   default handover countries and the cargo scenarios.
 - `POST /api/cargo` takes `from`, `to`, `areas` (areas of denial), `wez` (the
   same shapes) and optionally `cargo` (`[{"class": "V", "short_tons": 800}]`)
-  and `handover_countries`. It returns `legs` (each with its `carrier`,
+  and `handover_countries`, and `priority`, `economic` or `urgent` (for all the
+  cargo, or on an item). It returns `legs` (each with its `mode`, sea, air or road, its `carrier`,
   `length_nm`, `wez_nm` and `line`), `classes`, each with its `plan`, its
   `handover` port, its distances and its `flags`, and `routes`: the classes
   that travel the same legs, gathered into one, with their flags merged.
@@ -217,7 +233,8 @@ route, `extra_nm`, and `blocked` with a reason when no route is possible.
 | `map_snapshot.py` | Draws a scenario's map as SVG (and PNG) |
 | `scenarios/` | The test scenarios, one JSON file each |
 | `cargo_capability.py`, `cargo/` | Rates each port for each class of supply. See [cargo/README.md](cargo/README.md) |
-| `cargo_movement.py` | Moves cargo through a scenario: who carries each class, and where it changes hands |
+| `cargo_movement.py` | Moves cargo through a scenario: who carries each class, by sea or air, and where it changes hands |
+| `air_routing.py` | Flights between airfields: great circles within an aircraft's range, with refuelling stops |
 | `run_cargo_scenarios.py`, `cargo_scenarios/` | The cargo scenarios and their report. See [cargo_scenarios/README.md](cargo_scenarios/README.md) |
 
 To use the data in Neo4j instead, follow `neo4j-datamodel/START_HERE.md`.
@@ -229,6 +246,7 @@ To use the data in Neo4j instead, follow `neo4j-datamodel/START_HERE.md`.
 |---|---|---|
 | Ports | [NGA World Port Index (Pub 150)](https://msi.nga.mil/Publications/WPI) | U.S. government public data |
 | Airfields and runways | [OurAirports](https://ourairports.com/data/) | Public domain |
+| Aircraft figures | [Boeing freighters](https://www.boeing.com/commercial/freighters) and US Air Force C-17 fact sheets; see `cargo/air_rules.json` | |
 | Shipping-lane network | [Eurostat searoute, MARNET network](https://github.com/eurostat/searoute), via [searoute-ts](https://github.com/mayurrawte/searoute-ts) | [EUPL-1.2](https://spdx.org/licenses/EUPL-1.2.html) |
 | Coastline (map only) | [Natural Earth](https://www.naturalearthdata.com/) 1:50m land | Public domain |
 | Map libraries | [d3-geo, d3-array](https://d3js.org/), [topojson-client](https://github.com/topojson/topojson-client) | ISC |

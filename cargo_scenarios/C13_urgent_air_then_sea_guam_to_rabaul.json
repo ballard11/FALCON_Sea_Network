@@ -1,0 +1,24 @@
+{
+  "id": "C13",
+  "name": "Urgent, air then sea: Guam to Rabaul, no airfield at the destination",
+  "purpose": "Urgent relief cargo from Guam to Rabaul, Papua New Guinea. Rabaul has no airfield in the model's airfield list (paved runways of 8,000 ft or more) within 100 nm, so no flight reaches it. Cargo that may fly goes as far as it can by air, to the airfield nearest a port that can take it, and on by sea from there. Bulk fuel, ammunition and major end items go by sea: fuel never flies, and for the other two the flights take longer than the voyage. There is no WEZ. The quantities are illustrative.",
+  "from": "Apra Harbor",
+  "to": "Rabaul",
+  "areas": [],
+  "priority": "urgent",
+  "expect": {
+    "mode": {
+      "*": "air_sea",
+      "III": "sea",
+      "V": "sea",
+      "VII": "sea"
+    },
+    "plan": {
+      "*": "commercial_military_commercial",
+      "III": "commercial",
+      "V": "commercial",
+      "VII": "commercial"
+    },
+    "bottleneck_classes": ["III"]
+  }
+}

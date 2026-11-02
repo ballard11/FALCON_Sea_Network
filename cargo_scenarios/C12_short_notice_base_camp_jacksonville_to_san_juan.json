@@ -1,0 +1,25 @@
+{
+  "id": "C12",
+  "name": "Short-notice base camp: Jacksonville to San Juan, first package urgent",
+  "purpose": "Modelled loosely on LOGCAP's 2017 hurricane relief in Puerto Rico, where the contractor's first base camp equipment landed three days after the notice to proceed, moved by commercial air, sea and land (Army Sustainment Command public affairs). Here the camp equipment, construction material and medical supplies are urgent, so commercial freighters fly them; food and fuel are economic and follow by sea. There is no WEZ. The origin port and the quantities are illustrative.",
+  "from": "Jacksonville",
+  "to": "WPI-11110",
+  "cargo": [
+    {"class": "II", "short_tons": 200, "priority": "urgent"},
+    {"class": "IV", "short_tons": 400, "priority": "urgent"},
+    {"class": "VIII", "short_tons": 20, "priority": "urgent"},
+    {"class": "I", "short_tons": 500},
+    {"class": "III", "short_tons": 1000}
+  ],
+  "expect": {
+    "mode": {
+      "*": "air",
+      "I": "sea",
+      "III": "sea"
+    },
+    "plan": {
+      "*": "commercial"
+    },
+    "bottleneck_classes": []
+  }
+}

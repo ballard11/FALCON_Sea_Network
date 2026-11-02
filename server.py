@@ -13,7 +13,7 @@ Python 3, stdlib only. All routing lives in sea_routing.py.
                                          {"type": "polygon", "points": [[lon, lat], ...]}]}
     GET  /api/cargo/meta      supply classes, carriers, handover countries, cargo scenarios
     POST /api/cargo           {"from": port_id, "to": port_id, "areas": [...], "wez": [...],
-                               "cargo": [{"class": "I", "short_tons": 500}, ...]}
+                               "cargo": [{"class": "I", "short_tons": 500}, ...], "priority": "urgent"}
                               areas of denial close the water to everyone, a WEZ to
                               commercial carriers only; see cargo_movement.py
 """
@@ -134,6 +134,12 @@ def find_routes(body):
     return result
 
 
+def _priority(v):
+    if v is not None and v not in ("economic", "urgent"):
+        raise BadRequest("priority must be economic or urgent.")
+    return v
+
+
 def find_cargo(body):
     origin, goal = body.get("from"), body.get("to")
     if origin not in GRAPH.ports or goal not in GRAPH.ports:
@@ -151,14 +157,16 @@ def find_cargo(body):
                 raise BadRequest("Each cargo item needs a class: " + ", ".join(PLANNER.classes) + ".")
             if tons is not None and not (isinstance(tons, (int, float)) and 0 <= tons <= 1e7):
                 raise BadRequest("short_tons must be a number from 0 to 10,000,000.")
-        cargo = [{"class": i["class"], "short_tons": i.get("short_tons")} for i in cargo]
+            _priority(item.get("priority"))
+        cargo = [{k: i[k] for k in ("class", "short_tons", "priority") if i.get(k) is not None} for i in cargo]
     countries = body.get("handover_countries")
     if countries is not None and not (isinstance(countries, list) and len(countries) <= 100
                                       and all(isinstance(c, str) for c in countries)):
         raise BadRequest("handover_countries must be a list of country names.")
+    priority = _priority(body.get("priority")) or "economic"
     started = time.perf_counter()
     with LOCK:
-        plan = PLANNER.plan(origin, goal, cargo, denial, wez, countries)
+        plan = PLANNER.plan(origin, goal, cargo, denial, wez, countries, priority)
     plan["ms"] = round((time.perf_counter() - started) * 1000)
     return plan
 
@@ -185,7 +193,7 @@ def cargo_scenarios():
         if frm and to:
             out.append({"id": s["id"], "name": s["name"], "purpose": s.get("purpose", ""), "from": frm, "to": to,
                         "areas": s.get("areas", base.get("areas", [])), "wez": s.get("wez", []),
-                        "cargo": s.get("cargo") or PLANNER.default_cargo()})
+                        "cargo": s.get("cargo") or PLANNER.default_cargo(), "priority": s.get("priority", "economic")})
     return out
 
 
@@ -195,6 +203,8 @@ CARGO_META = {
     "carriers": {k: v["label"] for k, v in PLANNER.rules["carriers"].items() if not k.startswith("_")},
     "handover_countries": PLANNER.rules["handover"]["countries"],
     "window_nm": PLANNER.rules["handover"]["window_nm"],
+    "flies": {cid: v for cid, v in PLANNER.air_rules["classes"].items() if not cid.startswith("_")},
+    "aircraft": {k: v["name"] for k, v in PLANNER.air_rules["aircraft"].items() if not k.startswith("_")},
     "scenarios": cargo_scenarios(),
 }
 

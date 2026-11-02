@@ -1,0 +1,65 @@
+{
+  "_about": "How cargo flies, and when it flies instead of going by sea. Read by air_routing.py and cargo_movement.py; see cargo_scenarios/README.md. Every number says where it came from.",
+
+  "aircraft": {
+    "_note": "One aircraft type per carrier, as a class of aircraft. Range is with the payload given. The commercial carrier never enters a WEZ; the military may. Neither enters an area of denial.",
+    "commercial": {
+      "name": "Wide-body freighter (Boeing 777F class)",
+      "payload_st": 118,
+      "range_nm": 5000,
+      "cruise_kt": 480,
+      "min_runway_ft": 9000,
+      "sources": {
+        "payload_st": "Boeing, https://www.boeing.com/commercial/freighters : 107 tonnes maximum structural payload (= 118 short tons). Claude (page fetched and quoted), 2026-10-30",
+        "range_nm": "Boeing, same page: 5,000 nmi with a 107-tonne payload. Claude (page fetched and quoted), 2026-10-30",
+        "cruise_kt": "Working value chosen by Claude; the Boeing page gives no speed. Check before relying on it",
+        "min_runway_ft": "Working value chosen by Claude; no sourced figure found. Boeing's airport planning documents give the real figure for a weight and temperature"
+      }
+    },
+    "military": {
+      "name": "Strategic airlifter (C-17 class)",
+      "payload_st": 85,
+      "range_nm": 2400,
+      "cruise_kt": 450,
+      "min_runway_ft": 3500,
+      "sources": {
+        "payload_st": "US Air Force C-17 fact sheet: maximum payload 170,900 lb (= 85 short tons). Claude (web search summary; af.mil refused the page), 2026-10-30",
+        "range_nm": "445th Airlift Wing C-17 fact sheet: about 2,400 nm unrefueled with a 169,000 lb payload. Claude (web search summary; page not opened), 2026-10-30",
+        "cruise_kt": "Air Mobility Command C-17 fact sheet: 450 knots at 28,000 ft. Claude (web search summary; page not opened), 2026-10-30",
+        "min_runway_ft": "Dover AFB and National Museum of the US Air Force C-17 fact sheets: runways as short as 3,500 ft. Claude (web search summary; pages not opened), 2026-10-30"
+      }
+    }
+  },
+
+  "classes": {
+    "_note": "Which carriers may fly each class: any, military (military aircraft only) or none (never by air). Judgements by Claude for the demo, for a planner to review.",
+    "I": "any",
+    "II": "any",
+    "III": "none",
+    "IV": "any",
+    "V": "military",
+    "VI": "any",
+    "VII": "military",
+    "VIII": "any",
+    "IX": "any"
+  },
+
+  "handling": {
+    "_note": "Illustrative allowances chosen by Claude, not planning factors. Ship days count each port where cargo is loaded, handed over or discharged. Air hours count each airfield where cargo is loaded, handed over or unloaded, plus each refuelling stop. Road is between a port and its airfield.",
+    "ship_port_days": 1.0,
+    "airfield_hours": 4.0,
+    "refuel_stop_hours": 2.0,
+    "road_kt": 25.0
+  },
+
+  "airfields": {
+    "_note": "The airfield used for a port is the nearest one, within max_road_nm, with a long enough runway. Refuelling stops and handovers use only airfields in these countries (ISO codes, as in airfields.csv). country_codes maps the names in movement_rules.json to those codes. Air handover ports need a runway long enough for both aircraft.",
+    "max_road_nm": 100,
+    "stop_countries": ["US", "GU", "MP", "UM", "JP", "KR", "PH", "AU", "SG", "PW", "FM", "MH", "PG", "PR"],
+    "country_codes": {
+      "United States": "US", "Guam": "GU", "Northern Mariana Islands": "MP", "Japan": "JP", "South Korea": "KR",
+      "Philippines": "PH", "Australia": "AU", "Singapore": "SG", "Palau": "PW", "Federated States of Micronesia": "FM",
+      "Marshall Islands": "MH", "Papua New Guinea": "PG"
+    }
+  }
+}

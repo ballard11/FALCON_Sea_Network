@@ -66,16 +66,69 @@ The rules and nominal values are in `cargo/movement_rules.json`: the carrier
 names and speeds, the statuses a handover port needs, the 250 nm window, the
 default handover countries and the default cargo.
 
+## When cargo flies
+
+Each class has a **priority** (`priority`, for the scenario or one item of its
+cargo):
+
+- **Economic** (cheapest), the default: by sea. It is how routine, planned
+  cargo moves.
+- **Urgent** (fastest): the soonest way the class may go, of sea, **air**, and
+  **air, then sea**. Air then sea is tried when no flight reaches the
+  destination, for instance because it has no airfield with a long enough
+  runway within 100 nm. The cargo flies to the airfield nearest a **transfer
+  port**, goes by road to the port, and goes on by sea. The transfer port must
+  be outside the areas of denial, in the handover countries, rated Confirmed
+  or Inferred for the class, and near an airfield; of the 8 such ports nearest
+  the destination by sea, the one that gets the cargo there soonest is used.
+  The same works in reverse, by sea then air, out of an origin with no
+  airfield. Urgent cargo that cannot fly (bulk fuel, always) is a bottleneck.
+
+There is no cost model yet: "cheapest" means by sea, and the sortie count is
+the cost of flying to look at. Times are door to door: the sea time includes a day in each port where the
+cargo is worked, and the air time includes the road to and from the airfields,
+hours at each airfield where the cargo is worked, and refuelling stops.
+
+A flight goes between the airfields nearest the two ports (within 100 nm, with
+a long enough runway), by the same rules as at sea:
+
+- **Commercial aircraft** stay out of a WEZ. If they cannot reach the
+  destination's airfield, they hand over to **military airlift** at the
+  airfield outside the WEZ, in the handover countries, with a runway for both
+  aircraft, that gives the quickest military flight in. Retrograde works in
+  reverse. A handover must save the military at least the 250 nm window.
+- **Military aircraft** may enter a WEZ. Nobody enters an area of denial,
+  in the air or at sea.
+- A flight is a great circle, no longer than the aircraft's range with its
+  payload. When the direct flight is too long or would cross a closed area,
+  it lands on the way to refuel, at airfields in the stop countries, choosing
+  the stops that arrive soonest.
+- Some classes fly only on military aircraft (ammunition, major end items),
+  and bulk fuel never flies.
+- **Sorties** are the route's load divided by the aircraft's payload. Air days
+  assume there are enough aircraft to fly every sortie at once, so a high
+  sortie count is the cost to look at.
+
+The aircraft, the classes that may fly, the handling allowances and the
+airfield rules are in `cargo/air_rules.json`, each number with its source.
+Airfields are the 2,285 in `neo4j-datamodel/nodes/airfields.csv` (OurAirports,
+paved runways of 8,000 ft or more).
+
+| Carrier | Aircraft | Payload | Range with that payload | Cruise | Shortest runway |
+|---|---|---|---|---|---|
+| LOGCAP commercial contractor | Wide-body freighter (Boeing 777F class) | 118 short tons | 5,000 nm | 480 kt (working value) | 9,000 ft (working value) |
+| Military | Strategic airlifter (C-17 class) | 85 short tons | 2,400 nm | 450 kt | 3,500 ft |
+
 ## What each class runs into
 
 Every class in every scenario gets a list of flags, at four levels:
 
 | Level | Meaning | Flags |
 |---|---|---|
-| **Bottleneck** | Forces a worse plan for this class | No handover port can take it · the military carries it much further than other classes · the origin cannot load it or the destination cannot receive it (Ruled out) · both ends inside a WEZ · no route at all |
+| **Bottleneck** | Forces a worse plan for this class | No handover port can take it · the military carries it much further than other classes · the origin cannot load it or the destination cannot receive it (Ruled out) · both ends inside a WEZ · no route at all · it is urgent but cannot fly |
 | **Risk** | The plan depends on one thing | Only one handover port within 250 nm of the best |
 | **Check** | The data is thin | The handover port is only Inferred · the World Port Index cannot say whether the origin or destination can handle it · a nearer Medium or Large port is Unknown for it |
-| **Note** | Explains the plan | The far end is the nearest fallback · a handover would save too little |
+| **Note** | Explains the plan | The far end is the nearest fallback · a handover would save too little · urgent cargo flies, or flies then goes by sea · urgent cargo goes by sea because sea is no slower |
 
 "Much further" means more than 250 nm more military sailing than the class
 with the shortest military leg in the same scenario.
@@ -88,7 +141,11 @@ can be compared across moves. It takes in Taiwan, Okinawa, and Luzon as far sout
 Manila and Batangas.
 C09 uses a 450 nm WEZ over the East China Sea (29.5°N 125.5°E), which takes in
 Sasebo. Every scenario carries all nine classes, except C09, which carries
-retrograde of major end items (VII) and repair parts (IX).
+retrograde of major end items (VII) and repair parts (IX), and C12, which
+carries five.
+
+C01 to C10 are economic, so everything goes by sea. C11 and C13 are urgent,
+and C12 makes three of its five classes urgent, so some classes fly.
 
 Results of the run on 30 October 2026:
 
@@ -104,6 +161,9 @@ Results of the run on 30 October 2026:
 | C08 Singapore to Manila, central South China Sea denied, WEZ | Commercial, then military; V by military the whole way (2,150 nm) | Cebu South Port for I, II and IV (military 605 nm); Cebu for III; Cagayan de Oro for VI to IX (650 nm) | V |
 | C09 Retrograde, Sasebo to Guam, WEZ over the East China Sea | Military, then commercial | Kure (military 236 nm) | none |
 | C10 Manila to Puerto Princesa, Mindoro Strait denied, WEZ | Military the whole way (672 nm); no handover would save more than 11 nm | none | I, II, III, VI, VII, VIII, IX |
+| C11 Honolulu to Kao-Hsiung, WEZ, everything urgent | By sea it takes 15 to 21 days. Six classes fly: commercial freighters to Jeju, then military airlift in (732 nm, 665 in the WEZ); 18 freighter and 25 airlifter sorties. V and VII fly on military aircraft the whole way, refuelling at Wake and Iwo Jima (28 sorties). III cannot fly and goes by sea | Jeju International Airport, South Korea (air); Mokpo (sea, III) | III, urgent but cannot fly |
+| C12 Jacksonville to San Juan, base camp equipment urgent | II, IV and VIII fly by commercial freighter (0.5 days, 6 sorties) instead of 4.6 days by sea; food and fuel are economic and go by sea | none | none |
+| C13 Guam to Rabaul, everything urgent | Rabaul has no airfield in the list within 100 nm, so no flight reaches it. Six classes fly by commercial freighter to Port Moresby, hand over to military airlift (the freighter needs a longer runway than Nadzab's, by the working value), fly to Nadzab, go by road to Lae and by sea to Rabaul: 3.8 days instead of 5.4; 18 freighter and 25 airlifter sorties. III cannot fly; V and VII go by sea because their flights would take longer | Port Moresby Jacksons International Airport (air) | III, urgent but cannot fly |
 
 What the runs show:
 
@@ -125,6 +185,16 @@ What the runs show:
   (7.9 m) is too shallow for the usual ship of seven classes (C10).
 - **A WEZ costs commercial carriers distance even with no handover**: 98 to
   315 nm in C03, C06 and C07.
+- **Air is fast, at a price in sorties.** In C11 everything that
+  may fly arrives in under a day instead of 15, but it takes 71 sorties, and
+  bulk fuel (3,000 short tons) still takes 15 days by sea. In C12 the
+  base camp package needs only 6 freighter sorties, which matches the usual
+  pattern: fly the first, urgent package; ship the rest.
+- **The furthest airfield is not always the destination.** In C13 no flight
+  reaches Rabaul, so urgent cargo flies to Lae's airfield and finishes by sea,
+  saving 1.6 days. Rabaul's own airport is not in the airfield list, which
+  keeps only paved runways of 8,000 ft or more; a planner should check whether
+  a C-17 could use it.
 
 ## A scenario file
 
@@ -148,13 +218,14 @@ What the runs show:
 | Field | Required | Meaning |
 |---|---|---|
 | `id` | yes | Short, unique label, such as `C05` |
-| `base` | yes | The route scenario in `scenarios/` this builds on. Its `from`, `to` and `areas` are used unless this file gives its own. |
+| `base` | unless `from` and `to` are given | The route scenario in `scenarios/` this builds on. Its `from`, `to` and `areas` are used unless this file gives its own. |
 | `name` | yes | One line for the report |
 | `purpose` | no | What the scenario is meant to show |
 | `from`, `to` | no | Override the base's ports: an exact World Port Index name or a port id |
 | `areas` | no | Areas of denial. Default: the base's. `[]` removes them. |
 | `wez` | no | Weapons engagement zones, in the same form as areas. Points are `[longitude, latitude]`. |
-| `cargo` | no | `[{"class": "VII", "short_tons": 1200}, ...]`. Default: all nine classes, in the quantities in `cargo/movement_rules.json` |
+| `cargo` | no | `[{"class": "VII", "short_tons": 1200}, ...]`. An item may have its own `priority`. Default: all nine classes, in the quantities in `cargo/movement_rules.json` |
+| `priority` | no | `economic` (cheapest: by sea), the default, or `urgent` (fastest: the soonest of sea, air, and air then sea) |
 | `handover_countries` | no | The only countries whose ports may be handover ports. Default: the list in `cargo/movement_rules.json`. `[]` allows any. |
 | `expect` | no | What must be true; see below |
 
@@ -166,8 +237,9 @@ is not named.
 
 | Key | Example | Passes when |
 |---|---|---|
-| `plan` | `{"*": "commercial_military", "V": "military"}` | Each class is carried this way: `commercial`, `commercial_military`, `military_commercial`, `military` or `blocked` |
-| `handover` | `{"*": "Mokpo", "V": null}` | Each class changes hands at this port (a name or a port id; `null` for none) |
+| `mode` | `{"*": "air", "III": "sea"}` | Each class goes this way: `sea`, `air`, `air_sea` (air, then sea) or `sea_air` |
+| `plan` | `{"*": "commercial_military", "V": "military"}` | Each class is carried this way: `commercial`, `commercial_military`, `military_commercial`, `military` or `blocked`; a mixed air and sea route may change hands twice, as in `commercial_military_commercial` |
+| `handover` | `{"*": "Mokpo", "V": null}` | Each class changes hands at this port or airfield (a name or an id; `null` for none) |
 | `military_nm` | `{"V": {"min": 3500, "max": 4000}}` | The military carries the class this far |
 | `bottleneck_classes` | `["V"]` | Exactly these classes have a bottleneck |
 | `commercial_extra_nm` | `{"min": 250, "max": 400}` | The WEZ adds this much to the commercial route (when commercial carriers make the whole trip) |
@@ -184,8 +256,11 @@ the data or the code; they are not independent proof that the plan is right.
 - No military leg enters an area of denial, re-checked every 2 nm.
 - Every handover port is outside every area, in a handover country, and rated
   Confirmed or Inferred for its class.
-- Every leg starts and ends at its ports, matches its reported length within
-  2%, and is no shorter than the great-circle distance.
+- Every leg starts and ends at its ports or airfields, matches its reported
+  length within 2%, and is no shorter than the great-circle distance.
+- Every flight is within its aircraft's range on every stage, and lands only
+  on runways long enough for it. Air handover airfields have a runway for both
+  aircraft.
 
 ## Assumptions and judgements
 
@@ -207,6 +282,14 @@ made while building it, which a planner should review.
 | M10 | A port is inside an area if its position is. A port outside whose link to the shipping lanes crosses an area cannot be reached, so it cannot be a handover port. | Claude | `cargo_movement.py` |
 | M11 | Only Medium and Large ports are named as "nearer Unknown" ports to check, so the report does not suggest confirming small fishing harbours. | Claude | `cargo_movement.py` |
 | M12 | Honolulu's cargo pier depth is overridden to 11.0 m (the World Port Index has 6.4 m), from a third-party port listing Claude fetched and quoted. It gives no source or date; confirm it with Hawaii DOT Harbors. Without it, every class in C05 was flagged because Honolulu could not load it. | Claude | `cargo/port_overrides.csv` |
+| M13 | Each class is economic (cheapest) or urgent (fastest). Economic cargo goes by sea. Urgent cargo takes the soonest of sea, air, and air then sea. There is no cost model: cheapest means by sea, and sorties stand in for the cost of flying. | User (the economic or urgent framing; sea for routine, air for urgent); the rules are Claude's | `cargo_movement.py` |
+| M14 | Aircraft: a Boeing 777F-class freighter for commercial carriers (payload and range from Boeing's page, fetched and quoted) and a C-17-class airlifter for the military (payload, range, speed and runway from Air Force fact sheets, read only through search summaries because af.mil refused the pages). The freighter's cruise speed (480 kt) and shortest runway (9,000 ft) are working values with no source. | Claude | `air_rules.json` (`aircraft`, each with its sources) |
+| M15 | Which classes may fly: all but bulk fuel (III), which never flies, and ammunition (V) and major end items (VII), which fly only on military aircraft. | Claude | `air_rules.json` (`classes`) |
+| M16 | Handling allowances: a day in each port where cargo is worked; 4 hours at each airfield where cargo is worked; 2 hours per refuelling stop; road at 25 knots. Sea days now include the port days, so they are door to door. | Claude | `air_rules.json` (`handling`) |
+| M17 | Each port uses the nearest airfield within 100 nm with a long enough runway. Refuelling stops and air handovers use only airfields in the stop countries (the handover countries, plus US minor islands such as Wake, and Puerto Rico). | Claude | `air_rules.json` (`airfields`) |
+| M18 | Air times assume enough aircraft to fly every sortie at once; the sortie count shows what that takes. Aircraft numbers and airfield capacity are not modelled. | Claude | Not yet modelled |
+| M20 | Air then sea: tried only when no flight reaches the far end. The transfer port is one of the 8 ports nearest the far end by sea that are outside the areas of denial, in the handover countries, rated Confirmed or Inferred for the class, and within 100 nm of an airfield; the soonest wins. A day each to load at the transfer port and unload at the far end. The sea leg is commercial unless it starts, ends or runs inside a WEZ. | Claude (the user asked for air then sea when the furthest airfield is not the destination) | `cargo_movement.py` (`_mixed_option`) |
+| M19 | San Juan's maximum draft (11.6 m) and container terminal are overridden, from the Puerto Nuevo terminal operator's page, fetched and quoted. The World Port Index had a 7.9 m cargo pier and nothing recorded for containers. | Claude | `cargo/port_overrides.csv` |
 
 ### What was done in code, and what by Claude
 
@@ -220,3 +303,8 @@ made while building it, which a planner should review.
 | Checking surprising results: Mokpo as the Taiwan handover port was checked against a list of the nearest ports outside the WEZ and their ratings; Cebu South Port's ratings were read to explain C08 | Claude, with throwaway scripts; the results are in the ratings CSV |
 | Writing the expectations from the first run | Claude |
 | The Honolulu override (M12) | Claude, web search and page fetch |
+| Air routes: nearest airfields, flights with refuelling stops, air handovers, sorties | Code: `air_routing.py`, `cargo_movement.py` |
+| The air rules M13 to M18, and the aircraft figures | Claude; figures from the sources in `air_rules.json` |
+| Checking the air search: the exact test for a flight crossing a circle was compared with sampling every 2 nm on 4,000 random flights (no differences), and a C-17 from Miramar to Guam was checked to route through Hawaii and Wake | Claude, with throwaway scripts |
+| The San Juan overrides (M19) | Claude, web search and page fetch |
+| Economic or urgent, and air then sea (M13, M20); the C13 scenario, chosen by listing Pacific ports with no airfield within 100 nm | Code: `cargo_movement.py`; Claude, with a throwaway script |

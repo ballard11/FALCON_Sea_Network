@@ -1,0 +1,29 @@
+{
+  "id": "C11",
+  "base": "S05",
+  "name": "Urgent: Honolulu to Kao-Hsiung, Taiwan inside a WEZ",
+  "purpose": "C05's move, but every class is urgent. By sea it takes about 15 days door to door, so each class that may fly does: commercial freighters to the nearest airfield outside the WEZ, then military airlift in. Ammunition and major end items fly only on military aircraft, refuelling on the way. Bulk fuel (Class III) cannot fly, so it stays on the sea route: urgent, but 15 days away. The sortie counts show what flying it all would take.",
+  "areas": [],
+  "wez": [
+    {"type": "circle", "center": [121.0, 23.5], "radius_nm": 600}
+  ],
+  "priority": "urgent",
+  "expect": {
+    "mode": {
+      "*": "air",
+      "III": "sea"
+    },
+    "plan": {
+      "*": "commercial_military",
+      "V": "military",
+      "VII": "military"
+    },
+    "handover": {
+      "*": "Jeju International Airport (RKPC)",
+      "III": "Mokpo",
+      "V": null,
+      "VII": null
+    },
+    "bottleneck_classes": ["III"]
+  }
+}

@@ -9,8 +9,8 @@ bottlenecks each class runs into.
     python run_cargo_scenarios.py --no-png                     SVG snapshots only
 
 Each file in cargo_scenarios/ builds on one route scenario in scenarios/ (its
-"base"), adds weapons engagement zones and cargo, and says what should happen
-(see cargo_scenarios/README.md). The run asks cargo_movement.py for a plan,
+"base") or names its own ports, adds weapons engagement zones, cargo and when
+it is needed, and says what should happen (see cargo_scenarios/README.md). The run asks cargo_movement.py for a plan,
 checks it against the scenario's expectations and against rules every plan
 must keep, and writes
 
@@ -33,6 +33,7 @@ import time
 from datetime import datetime
 from html import escape
 
+import air_routing
 import cargo_capability
 import cargo_movement
 import map_snapshot
@@ -51,8 +52,22 @@ CLASSES = list(PLANNER.classes)
 PLANS = {"commercial": "Commercial the whole way", "commercial_military": "Commercial, then military",
          "military_commercial": "Military, then commercial", "military": "Military the whole way",
          "blocked": "Blocked"}
+
+
+def plan_text(plan):
+    """Any plan id as words: "commercial_military_commercial" -> "Commercial, then military, then commercial"."""
+    return PLANS.get(plan) or ", then ".join(plan.split("_")).capitalize()
+
+
 LEVELS, FLAG_NAMES = cargo_movement.LEVELS, cargo_movement.FLAG_NAMES
-INPUTS = (cargo_capability.PORTS, cargo_capability.RULES, cargo_capability.OVERRIDES, cargo_movement.RULES)
+INPUTS = (cargo_capability.PORTS, cargo_capability.RULES, cargo_capability.OVERRIDES, cargo_movement.RULES,
+          cargo_movement.AIR_RULES, air_routing.AIRFIELDS)
+AIR = PLANNER.air
+
+
+def coords(place):
+    """A port's or an airfield's (lon, lat)."""
+    return GRAPH.coords.get(place) or AIR.coords[place]
 
 
 # ----------------------------------------------------------------- loading
@@ -67,19 +82,22 @@ def load_bases():
 def load_scenario(path, bases):
     with open(path, encoding="utf-8") as f:
         s = json.load(f)
-    for key in ("id", "name", "base"):
+    for key in ("id", "name") + (() if "from" in s and "to" in s else ("base",)):
         if key not in s:
             raise ScenarioError("%s has no %r." % (os.path.basename(path), key))
-    if s["base"] not in bases:
+    if s.get("base") and s["base"] not in bases:
         raise ScenarioError("Base scenario %s is not in scenarios/." % s["base"])
-    base = bases[s["base"]]
+    base = bases.get(s.get("base"), {"areas": []})
     for key in ("from", "to", "areas"):
-        s.setdefault(key, base[key])       # the move and its areas of denial come from the base
+        if key not in s:
+            s[key] = base[key]             # the move and its areas of denial come from the base
+    s.setdefault("base", "")
     s["file"] = os.path.relpath(path, HERE).replace(os.sep, "/")
     s.setdefault("purpose", "")
     s.setdefault("wez", [])
     s.setdefault("cargo", None)
     s.setdefault("handover_countries", None)
+    s.setdefault("priority", "economic")
     s.setdefault("expect", {})
     return s
 
@@ -104,23 +122,29 @@ def grouped(values):
 
 def expectation_checks(plan, expect):
     out, rows = [], {c["class"]: c for c in plan["classes"]}
-    known = {"blocked_contains", "plan", "handover", "military_nm", "bottleneck_classes", "commercial_extra_nm"}
+    known = {"blocked_contains", "mode", "plan", "handover", "military_nm", "bottleneck_classes",
+             "commercial_extra_nm"}
     for key in sorted(set(expect) - known):
         out.append(check("Unknown expectation %r" % key, "one of: " + ", ".join(sorted(known)), key, False))
     if "blocked_contains" in expect:
         reason = plan.get("blocked") or ""
         out.append(check("The blocked reason says why", "mentions %r" % expect["blocked_contains"],
                          reason or "not blocked", expect["blocked_contains"].lower() in reason.lower()))
+    if "mode" in expect:
+        want = by_class(expect["mode"], rows)
+        got = {c: rows[c]["mode"] for c in want if c in rows}
+        out.append(check("Sea, air, or air then sea, for each class", grouped(want), grouped(got) or "no such classes", want == got))
     if "plan" in expect:
-        want = {c: PLANS.get(v, v) for c, v in by_class(expect["plan"], rows).items()}
-        got = {c: PLANS[rows[c]["plan"]] for c in want if c in rows}
+        want = {c: plan_text(v) for c, v in by_class(expect["plan"], rows).items()}
+        got = {c: plan_text(rows[c]["plan"]) for c in want if c in rows}
         out.append(check("Who carries each class", grouped(want), grouped(got) or "no such classes", want == got))
     if "handover" in expect:
         want = {c: v or "none" for c, v in by_class(expect["handover"], rows).items()}
         got = {}
         for c in want:
             h = rows[c]["handover"] if c in rows else None
-            got[c] = "none" if not h else h["id"] if want[c].startswith("WPI-") else h["name"]
+            got[c] = "none" if not h else h["id"] if want[c].startswith("WPI-") or want[c] in AIR.fields \
+                else h["name"]
         out.append(check("Handover port for each class", grouped(want), grouped(got), want == got))
     if "military_nm" in expect:
         for c, rng in by_class(expect["military_nm"], rows).items():
@@ -144,7 +168,7 @@ def invariant_checks(plan, denial, wez, countries):
     out = []
     if plan["blocked"]:
         return out
-    legs = {(x["carrier"], x["from"], x["to"]): x for x in plan["legs"]}
+    legs = {cargo_movement._key(x): x for x in plan["legs"]}
     broken = []
     for c in plan["classes"]:
         stops = [plan["origin"]] + [x["to"] for x in c["legs"]]
@@ -170,33 +194,55 @@ def invariant_checks(plan, denial, wez, countries):
                      "none, checked every %g nm" % routes.AREA_SAMPLE_NM, ", ".join(bad) or "none enter", not bad))
 
     statuses = PLANNER.rules["handover"]["statuses"]
+    codes = {PLANNER.air_rules["airfields"]["country_codes"].get(n) for n in countries}
     bad = []
     for c in plan["classes"]:
         h = c["handover"]
         if not h:
             continue
-        coords = GRAPH.coords[h["id"]]
-        if (any(a.contains(coords) for a in wez + denial) or h["status"] not in statuses
-                or (countries and GRAPH.ports[h["id"]]["country"] not in countries)):
+        inside = any(a.contains(coords(h["id"])) for a in wez + denial)
+        if h["status"] == "airfield":
+            wrong = (AIR.runway[h["id"]] < max(p["min_runway_ft"] for p in planes())
+                     or (countries and AIR.fields[h["id"]]["country_code"] not in codes))
+        else:
+            wrong = (h["status"] not in statuses
+                     or (countries and GRAPH.ports[h["id"]]["country"] not in countries))
+        if inside or wrong:
             bad.append("%s at %s" % (c["class"], h["name"]))
-    out.append(check("Handover ports are outside every area, in a handover country, and rated "
-                     + " or ".join(s.capitalize() for s in statuses) + " for their class",
-                     "all", ", ".join(bad) or "all", not bad))
+    out.append(check("Handover ports are outside every area and in a handover country; sea ones are rated "
+                     + " or ".join(s.capitalize() for s in statuses) + " for their class, air ones have a runway "
+                     "for both aircraft", "all", ", ".join(bad) or "all", not bad))
+
+    flights = [x for x in legs.values() if x["mode"] == "air"]
+    if flights:
+        bad = []
+        for x in flights:
+            plane = PLANNER.air_rules["aircraft"][x["carrier"]]
+            hops = x["hops"]
+            if (any(great_circle_nm(AIR.coords[a], AIR.coords[b]) > plane["range_nm"] for a, b in zip(hops, hops[1:]))
+                    or any(AIR.runway[f] < plane["min_runway_ft"] for f in hops)):
+                bad.append("%s to %s" % (x["from_name"], x["to_name"]))
+        out.append(check("Every flight is within its aircraft's range, between runways long enough for it",
+                         "all", ", ".join(bad) or "all", not bad))
 
     ends, worst, short = 0.0, 0.0, []
     for x in legs.values():
-        ends = max(ends, great_circle_nm(x["line"][0], GRAPH.coords[x["from"]]),
-                   great_circle_nm(x["line"][-1], GRAPH.coords[x["to"]]))
+        ends = max(ends, great_circle_nm(x["line"][0], coords(x["from"])),
+                   great_circle_nm(x["line"][-1], coords(x["to"])))
         worst = max(worst, abs(routes.line_nm(x["line"]) - x["length_nm"]) / max(x["length_nm"], 1.0))
-        if x["length_nm"] < great_circle_nm(GRAPH.coords[x["from"]], GRAPH.coords[x["to"]]) - 0.5:
+        if x["length_nm"] < great_circle_nm(coords(x["from"]), coords(x["to"])) - 0.5:
             short.append("%s to %s" % (x["from_name"], x["to_name"]))
-    out.append(check("Every leg starts and ends at its ports", "within %g nm" % routes.END_TOLERANCE_NM,
+    out.append(check("Every leg starts and ends at its ports or airfields", "within %g nm" % routes.END_TOLERANCE_NM,
                      "%.2f nm off at worst" % ends, ends <= routes.END_TOLERANCE_NM))
     out.append(check("Each leg's drawn line matches its reported length",
                      "within %g%%" % (routes.LENGTH_TOLERANCE * 100), "%.2f%% at worst" % (worst * 100),
                      worst <= routes.LENGTH_TOLERANCE))
     out.append(check("No leg is shorter than the great-circle distance", "none", ", ".join(short) or "none", not short))
     return out
+
+
+def planes():
+    return [v for k, v in PLANNER.air_rules["aircraft"].items() if not k.startswith("_")]
 
 
 # --------------------------------------------------------------------- run
@@ -209,13 +255,14 @@ def run_one(s, snap_dir, browser):
     countries = s["handover_countries"] if s["handover_countries"] is not None \
         else PLANNER.rules["handover"]["countries"]
     started = time.perf_counter()
-    plan = PLANNER.plan(origin, goal, s["cargo"], denial, wez, countries)
+    plan = PLANNER.plan(origin, goal, s["cargo"], denial, wez, countries, s["priority"])
     seconds = time.perf_counter() - started
     checks = expectation_checks(plan, s["expect"]) + invariant_checks(plan, denial, wez, countries)
 
     closed = GRAPH.links_in_areas(denial) if denial else frozenset()
     title = "%s  ·  %s → %s" % (s["id"], plan["origin_name"], plan["goal_name"])
-    sub = "Cargo, %d classes%s%s" % (len(plan["classes"]),
+    sub = "Cargo, %d classes%s%s%s" % (len(plan["classes"]),
+                                       ", urgent" if s["priority"] == "urgent" else "",
                                      ", %d WEZ" % len(wez) if wez else ", no WEZ",
                                      ", %d area%s of denial" % (len(denial), "" if len(denial) == 1 else "s")
                                      if denial else "")
@@ -237,7 +284,7 @@ def run_one(s, snap_dir, browser):
             "from": {"id": origin, "name": plan["origin_name"], "country": GRAPH.ports[origin]["country"]},
             "to": {"id": goal, "name": plan["goal_name"], "country": GRAPH.ports[goal]["country"]},
             "areas": s["areas"], "wez": s["wez"], "handover_countries": countries,
-            "passed": all(c["passed"] for c in checks), "checks": checks,
+            "priority": s["priority"], "passed": all(c["passed"] for c in checks), "checks": checks,
             "blocked": plan["blocked"], "handover_side": plan.get("handover_side"),
             "commercial_direct": plan["commercial_direct"], "military_direct": plan["military_direct"],
             "commercial_extra_nm": plan["commercial_extra_nm"],
@@ -251,7 +298,7 @@ def failed_run(path, error):
     return {"id": stem, "base": "", "name": stem, "purpose": "This scenario could not run.",
             "file": os.path.relpath(path, HERE).replace(os.sep, "/"),
             "from": {"id": "", "name": "?", "country": ""}, "to": {"id": "", "name": "?", "country": ""},
-            "areas": [], "wez": [], "handover_countries": [], "passed": False,
+            "areas": [], "wez": [], "handover_countries": [], "priority": "economic", "passed": False,
             "checks": [check("The scenario runs", "no errors", str(error), False)], "blocked": str(error),
             "handover_side": None, "commercial_direct": None, "military_direct": None,
             "commercial_extra_nm": None, "classes": [], "routes": [], "legs": [], "seconds": 0, "snapshots": []}
@@ -267,13 +314,18 @@ def inputs():
 
 
 # ------------------------------------------------------------------ output
+def full_leg(r, x):
+    return next(l for l in r["legs"] if cargo_movement._key(l) == cargo_movement._key(x))
+
+
 def leg_text(r, x):
-    leg = next(l for l in r["legs"] if (l["carrier"], l["from"], l["to"]) == (x["carrier"], x["from"], x["to"]))
-    return "%s: %s to %s" % (leg["carrier_label"], leg["from_name"], leg["to_name"])
+    leg = full_leg(r, x)
+    return "%s by %s: %s to %s" % (leg["carrier_label"], leg["mode"], leg["from_name"], leg["to_name"])
 
 
 def write_csv(path, results):
-    cols = ["scenario", "base", "class_id", "class_name", "route", "short_tons", "plan", "carried_by", "handover_port",
+    cols = ["scenario", "base", "class_id", "class_name", "route", "short_tons", "priority", "mode",
+            "sea_days", "air_days", "sorties", "plan", "transfer_port", "carried_by", "handover_port",
             "handover_country", "handover_status", "handover_options", "backups", "origin_status",
             "destination_status", "commercial_nm", "military_nm", "wez_nm", "days", "military_ton_nm",
             "bottlenecks", "risks", "checks", "flags"]
@@ -285,7 +337,12 @@ def write_csv(path, results):
                 h = c["handover"] or {}
                 w.writerow({"scenario": r["id"], "base": r["base"], "class_id": c["class"],
                             "class_name": c["class_name"], "route": c["route"], "short_tons": c["short_tons"] or "",
-                            "plan": PLANS[c["plan"]], "carried_by": "; ".join(leg_text(r, x) for x in c["legs"]),
+                            "priority": c["priority"], "mode": c["mode"], "sea_days": c["sea_days"] or "",
+                            "air_days": c["air_days"] or "",
+                            "sorties": "; ".join("%d %s" % (n, PLANNER.air_rules["aircraft"][k]["name"])
+                                                 for k, n in (c["sorties"] or {}).items()),
+                            "plan": plan_text(c["plan"]), "transfer_port": (c["transfer"] or {}).get("name", ""),
+                            "carried_by": "; ".join(leg_text(r, x) for x in c["legs"]),
                             "handover_port": h.get("name", ""), "handover_country": h.get("country", ""),
                             "handover_status": h.get("status", ""), "handover_options": c["handover_options"],
                             "backups": c["backups"], "origin_status": c["origin_status"],
@@ -317,6 +374,7 @@ CSS = routes.CSS + """
 """
 SHORT = {"commercial": "C", "commercial_military": "C→M", "military_commercial": "M→C", "military": "M",
          "blocked": "—"}
+MODE = {"sea": "Sea", "air": "Air", "air_sea": "Air, then sea", "sea_air": "Sea, then air", "road": "Road"}
 
 
 def _flags_html(flags):
@@ -331,13 +389,32 @@ def _flags_html(flags):
 def _legs_html(r, route):
     out = []
     for x in route["legs"]:
-        leg = next(l for l in r["legs"] if (l["carrier"], l["from"], l["to"]) == (x["carrier"], x["from"], x["to"]))
-        out.append("<span class='carrier' style='background:%s'></span><b>%s</b> %s → %s, %s nm%s · via %s" % (
+        leg = full_leg(r, x)
+        via = ("by sea, via " + (", ".join(leg["passages"]) or "open water") if leg["mode"] == "sea"
+               else "by road" if leg["mode"] == "road"
+               else "by air, %s%s" % (leg["aircraft"], ", stopping at " + ", ".join(leg["stops"]) if leg["stops"] else ""))
+        out.append("<span class='carrier' style='background:%s'></span><b>%s</b> %s → %s, %s nm%s · %s" % (
             map_snapshot.COMMERCIAL if leg["carrier"] == "commercial" else map_snapshot.MILITARY,
             escape(leg["carrier_label"]), escape(leg["from_name"]), escape(leg["to_name"]), routes._nm(leg["length_nm"]),
-            ", %s in WEZ" % routes._nm(leg["wez_nm"]) if leg["wez_nm"] >= 1 else "",
-            escape(", ".join(leg["passages"]) or "open water")))
+            ", %s in WEZ" % routes._nm(leg["wez_nm"]) if leg["wez_nm"] >= 1 else "", escape(via)))
     return "<br>".join(out) or "—"
+
+
+def _timing_html(route):
+    """Days door to door, and for urgent cargo how sea and air compare."""
+    out = "%.1f" % route["days"]
+    if route["priority"] != "economic":
+        sea = route["sea_days"]
+        out += "<br><span class='meta'>%s; sea %s%s</span>" % (
+            "urgent" if route["priority"] == "urgent" else "partly urgent",
+            "%.1f" % sea[0] if sea and sea[0] == sea[1] else "%.1f to %.1f" % tuple(sea) if sea else "blocked",
+            "; %s %.1f" % ("air" if route["mode"] == "sea" else MODE[route["mode"]].lower(), route["air_days"])
+            if route["air_days"] is not None else "; cannot fly")
+    if route["sorties"]:
+        out += "<br><span class='meta'>%s</span>" % ", ".join(
+            "%d %s sortie%s" % (n, PLANNER.air_rules["aircraft"][k]["name"], "" if n == 1 else "s")
+            for k, n in route["sorties"].items())
+    return out
 
 
 def _handover_html(route):
@@ -369,8 +446,9 @@ def class_matrix(results):
             worst_nm = max(worst_nm, c["military_nm"])
             tip = " | ".join("%s: %s" % (f["level"], f["text"]) for f in c["flags"]) or "no flags"
             nm = (" %s" % format(round(c["military_nm"]), ",")) if c["military_nm"] else ""
-            cells.append("<td class='cell-%s' title='%s'>%s%s</td>" % (lv or "none", escape(tip, quote=True),
-                                                                       SHORT[c["plan"]], nm))
+            cells.append("<td class='cell-%s' title='%s'>%s%s%s</td>" % (
+                lv or "none", escape(tip, quote=True), {"air": "Air ", "air_sea": "Air+sea ", "sea_air": "Sea+air "}.get(c["mode"], ""),
+                SHORT.get(c["plan"], c["plan"].replace("commercial", "C").replace("military", "M").replace("_", "→")), nm))
         rows.append("<tr><td>%s %s</td>%s<td class='num'>%d</td><td class='num'>%s</td></tr>" % (
             cid, escape(PLANNER.classes[cid]["name"]), "".join(cells), hit, format(round(worst_nm), ",")))
     return ("<table class='matrix'><tr><th>Class</th>%s<th class='num'>Scenarios with a bottleneck</th>"
@@ -398,8 +476,9 @@ def write_report(out_dir, run, results, prev_when, prev):
     passed = sum(r["passed"] for r in results)
     rows = []
     for r in results:
-        plans = ["%d. %s%s (%s)" % (x["route"], PLANS[x["plan"]], ", via " + x["handover"]["name"] if x["handover"] else "",
-                                    ", ".join(x["classes"])) for x in r["routes"]]
+        plans = ["%d. %s, %s%s (%s)" % (x["route"], MODE[x["mode"]], plan_text(x["plan"]).lower(),
+                                        ", via " + x["handover"]["name"] if x["handover"] else "",
+                                        ", ".join(x["classes"])) for x in r["routes"]]
         hand = sorted({c["handover"]["name"] for c in r["classes"] if c["handover"]})
         change = "new"
         before = prev.get(r["id"])
@@ -422,12 +501,15 @@ def write_report(out_dir, run, results, prev_when, prev):
     sections = []
     for r in results:
         route_rows = "".join(
-            "<tr><td>%d</td><td>%s</td><td class='num'>%s</td><td>%s</td><td>%s</td><td class='num'>%.1f</td>"
+            "<tr><td>%d</td><td>%s</td><td class='num'>%s</td><td>%s</td><td>%s</td><td class='num'>%s</td>"
             "<td>%s</td></tr>" % (
                 x["route"], "<br>".join("%s %s" % (c, escape(PLANNER.classes[c]["name"])) for c in x["classes"]),
                 format(x["short_tons"], ",") if x["short_tons"] else "—",
-                escape(PLANS[x["plan"]]) + "<br>" + _legs_html(r, x), _handover_html(x), x["days"],
-                _flags_html(x["flags"]))
+                "<b>%s</b> · %s<br>" % (MODE[x["mode"]], escape(plan_text(x["plan"])))
+                + ("<span class='meta'>changes from %s at %s</span><br>" % (
+                    "air to sea" if x["mode"] == "air_sea" else "sea to air", escape(x["transfer"]["name"]))
+                   if x["transfer"] else "") + _legs_html(r, x),
+                _handover_html(x), _timing_html(x), _flags_html(x["flags"]))
             for x in r["routes"])
         check_rows = "".join(
             "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
@@ -441,6 +523,10 @@ def write_report(out_dir, run, results, prev_when, prev):
         chips += ["<span>Denial: %s</span>" % escape(routes._area_text(a)) for a in r["areas"]]
         if r["commercial_extra_nm"]:
             chips.append("<span>The WEZ adds %s nm to the commercial route</span>" % routes._nm(r["commercial_extra_nm"]))
+        urgent = [c["class"] for c in r["classes"] if c["priority"] == "urgent"]
+        if urgent:
+            chips.append("<span>Urgent: %s</span>" % ("every class" if len(urgent) == len(r["classes"])
+                                                     else ", ".join(urgent)))
         chips.append("<span title='%s'>Handover countries: %d</span>" % (
             escape(", ".join(r["handover_countries"]), quote=True), len(r["handover_countries"])))
         maps = "".join('<figure><figcaption>%s</figcaption>%s</figure>' % (
@@ -457,12 +543,12 @@ def write_report(out_dir, run, results, prev_when, prev):
   %s
   <h3>Routes</h3>
   <div class="wrap"><table><tr><th>Route</th><th>Classes</th><th class="num">Short tons</th><th>Carried by</th>
-    <th>Handover port</th><th class="num">Days at %d kt</th><th>Bottlenecks, risks and checks</th></tr>%s</table></div>
+    <th>Handover</th><th class="num">Days, door to door</th><th>Bottlenecks, risks and checks</th></tr>%s</table></div>
   <h3>Checks</h3>
   <div class="wrap"><table><tr><th>Check</th><th>Expected</th><th>Actual</th><th></th></tr>%s</table></div>
   <p class="meta">Scenario file %s · snapshots %s · %.2f s</p>
 </section>""" % (escape(r["id"]), escape(r["id"]), escape(r["name"]), routes._badge(r["passed"]), escape(r["purpose"]),
-                 "".join(chips), maps, PLANNER.rules["carriers"]["military"]["knots"], route_rows, check_rows, escape(r["file"]), files, r["seconds"]))
+                 "".join(chips), maps, route_rows, check_rows, escape(r["file"]), files, r["seconds"]))
 
     hand = PLANNER.rules["handover"]
     html = """<!doctype html>
@@ -485,9 +571,17 @@ there. A handover is used only if it saves the military at least %d nm; otherwis
 way. When the origin is the end inside a WEZ, the same happens in reverse. Port ratings come from the NGA World Port
 Index through <code>cargo_capability.py</code>, with the sourced overrides in <code>cargo/port_overrides.csv</code>.
 Unknown in the World Port Index means no information, not No.</p>
+<p class="purpose">Each class is <b>economic</b> (cheapest) or <b>urgent</b> (fastest). Economic cargo goes <b>by
+sea</b>. Urgent cargo takes the soonest way it may: by sea; <b>by air</b>, between the airfields nearest the two
+ports; or, when no flight reaches the far end, <b>by air, then sea</b>: it flies to the airfield nearest a port close
+to the destination and goes on by sea from there. Commercial aircraft follow the sea rules: they stay out of a WEZ
+and hand over to military airlift at an airfield outside it. Flights are great circles within each aircraft's range,
+refuelling at airfields on the way when needed (<code>cargo/air_rules.json</code>). Bulk fuel never flies, so urgent
+fuel is a bottleneck. There is no cost model yet: the sortie count is the cost of flying to look at.</p>
 <p class="meta"><b>C</b> commercial the whole way · <b>C→M</b> commercial, then military · <b>M→C</b> military, then
-commercial · <b>M</b> military the whole way · the number is the military's distance in nm. A red cell has a
-bottleneck, an amber cell a risk; hover for the details. Quantities are illustrative, not planning factors.</p>
+commercial · <b>M</b> military the whole way · <b>Air</b> in front when it flies · the number is the military's
+distance in nm. A red cell has a bottleneck, an amber cell a risk; hover for the details. Quantities are
+illustrative, not planning factors.</p>
 </section>
 
 <section class="card wrap"><h2>Bottlenecks by class of supply</h2>%s</section>
@@ -498,9 +592,12 @@ each class raised each flag.</p>%s</section>
 <th>vs last run</th><th></th></tr>
 %s</table></section>
 %s
-<p class="meta">Distances are along the Eurostat MARNET shipping-lane network (100 km). Days use nominal speeds
-(commercial %d kt, military %d kt) and leave out time in port and at the handover. WEZs, handover countries and
-cargo quantities are illustrative inputs for the demo.</p>
+<p class="meta">Sea distances are along the Eurostat MARNET shipping-lane network (100 km); air distances are
+great circles between OurAirports airfields. Days are door to door: ships at a nominal %g knots (commercial) and
+%g knots (military) plus %g day in each port where the cargo is worked; aircraft at their cruise speeds plus %g hours
+at each airfield where the cargo is worked and %g at each refuelling stop. Air days assume enough aircraft to fly
+every sortie at once. These allowances, WEZs, handover countries and cargo quantities are illustrative inputs for
+the demo.</p>
 </main></body></html>""" % (
         CSS, escape(run["started"]), escape(run["code"]), len(results),
         "compared with the run of %s" % escape(prev_when) if prev_when else "no earlier run to compare with",
@@ -510,7 +607,9 @@ cargo quantities are illustrative inputs for the demo.</p>
         escape(PLANNER.rules["carriers"]["commercial"]["label"]), escape(PLANNER.rules["carriers"]["military"]["label"]),
         " or ".join(s.capitalize() for s in hand["statuses"]), hand["window_nm"],
         class_matrix(results), flag_summary(results), "\n".join(rows), "\n".join(sections),
-        PLANNER.rules["carriers"]["commercial"]["knots"], PLANNER.rules["carriers"]["military"]["knots"])
+        PLANNER.rules["carriers"]["commercial"]["knots"], PLANNER.rules["carriers"]["military"]["knots"],
+        PLANNER.air_rules["handling"]["ship_port_days"], PLANNER.air_rules["handling"]["airfield_hours"],
+        PLANNER.air_rules["handling"]["refuel_stop_hours"])
     with open(os.path.join(out_dir, "report.html"), "w", encoding="utf-8") as f:
         f.write(html)
 

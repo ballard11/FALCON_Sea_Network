@@ -343,8 +343,9 @@ def render_cargo(graph, plan, denial_spec, wez_spec, closed, title, subtitle="",
     """SVG of one cargo scenario. plan is CargoPlanner.plan()'s answer,
     denial_spec and wez_spec the scenario's areas, closed the link ids the
     areas of denial close. Commercial legs are blue and military legs amber;
-    each handover port is a white diamond labelled with the classes that
-    change hands there. closeup zooms in on the WEZs and handover ports."""
+    flights are dashed and road links thin. Each handover port or airfield
+    is a white diamond labelled with the classes that change hands there.
+    closeup zooms in on the WEZs and handover ports."""
     origin, goal = graph.coords[plan["origin"]], graph.coords[plan["goal"]]
     ref = origin[0]
     legs = [(leg, _continuous(leg["line"], ref)) for leg in plan.get("legs", [])]
@@ -355,17 +356,19 @@ def render_cargo(graph, plan, denial_spec, wez_spec, closed, title, subtitle="",
         return [_continuous(circle_points(a["center"], a["radius_nm"]) if a["type"] == "circle" else a["points"], mid)
                 for a in spec]
     den_rings, wez_rings = rings(denial_spec), rings(wez_spec)
-    handovers = {}
+    handovers, spots = {}, {}
     for cls in plan["classes"]:
-        if cls.get("handover"):
-            handovers.setdefault(cls["handover"]["id"], []).append(cls["class"])
-    here = lambda pid: (_unwrap(graph.coords[pid][0], mid), graph.coords[pid][1])
-    marks = [here(pid) for pid in handovers]
-    ends = [here(plan["origin"]), here(plan["goal"])]
+        h = cls.get("handover")
+        if h:
+            handovers.setdefault(h["id"], []).append(cls["class"])
+            spots[h["id"]] = ((h["lon"], h["lat"]), h["name"].split(" (")[0] if h["status"] == "airfield" else h["name"])
+    here = lambda pt: (_unwrap(pt[0], mid), pt[1])
+    marks = [here(spots[pid][0]) for pid in handovers]
+    ends = [here(origin), here(goal)]
     if closeup and (wez_rings or den_rings):
-        # Only handover ports near the WEZ end, so one far-off port can't undo the zoom.
+        # Only handovers near the WEZ end, so one far-off port can't undo the zoom.
         near = graph.coords[plan["origin"] if plan.get("handover_side") == "outbound" else plan["goal"]]
-        close = [here(pid) for pid in handovers if great_circle_nm(graph.coords[pid], near) <= CLOSEUP_NM]
+        close = [here(spots[pid][0]) for pid in handovers if great_circle_nm(spots[pid][0], near) <= CLOSEUP_NM]
         view = fit_view(wez_rings or den_rings, close, pad=0.25, min_span=16.0)
     elif closeup:
         g = ends[1]
@@ -379,32 +382,38 @@ def render_cargo(graph, plan, denial_spec, wez_spec, closed, title, subtitle="",
     for ring in den_rings:
         _area(c, ring, DENY)
 
-    # commercial legs, then military legs on top
+    # commercial legs, then military legs on top; flights dashed, road thin
+    style = {"sea": ('4', ''), "air": ('3', ' stroke-dasharray="9 6"'), "road": ('2', '')}
     for carrier, colour in (("commercial", COMMERCIAL), ("military", MILITARY)):
         for leg, line in legs:
             if leg["carrier"] == carrier:
-                c.add('<path d="%s" fill="none" stroke="%s" stroke-width="4" stroke-linecap="round" '
-                      'stroke-linejoin="round" stroke-opacity="0.95"/>' % (c.d(line), colour))
+                width, dash = style[leg.get("mode", "sea")]
+                c.add('<path d="%s" fill="none" stroke="%s" stroke-width="%s"%s stroke-linecap="round" '
+                      'stroke-linejoin="round" stroke-opacity="0.95"/>' % (c.d(line), colour, width, dash))
 
     _dot(c, ends[0], ORIGIN_DOT, plan["origin_name"])
     _dot(c, ends[1], DEST_DOT, plan["goal_name"])
     for pid, classes in handovers.items():
-        X, Y = c.xy(here(pid))
+        X, Y = c.xy(here(spots[pid][0]))
         _diamond(c, X, Y, HANDOVER)
         anchor, dx = ("end", -14) if X > WIDTH - 260 else ("start", 14)
         c.add('<text x="%.1f" y="%.1f" text-anchor="%s" font-size="15" font-weight="600" fill="%s" stroke="%s" '
               'stroke-width="4" paint-order="stroke">%s  ·  %s</text>' % (
-                  X + dx, Y + 5, anchor, INK, BG, escape(graph.ports[pid]["name"]), escape(" ".join(classes))))
+                  X + dx, Y + 5, anchor, INK, BG, escape(spots[pid][1]), escape(" ".join(classes))))
     _title(c, title, subtitle)
 
     rows = []
     for leg, _ in legs:
-        rows.append(("line", COMMERCIAL if leg["carrier"] == "commercial" else MILITARY, "%s  %s → %s  %s nm%s" % (
-            "Commercial" if leg["carrier"] == "commercial" else "Military", leg["from_name"], leg["to_name"],
-            format(round(leg["length_nm"]), ","),
-            ", %s in WEZ" % format(round(leg["wez_nm"]), ",") if leg["wez_nm"] >= 1 else "")))
+        if leg.get("mode") == "road":
+            continue                       # a few miles to the airfield: on the map, not in the key
+        rows.append(("dash" if leg.get("mode") == "air" else "line",
+                     COMMERCIAL if leg["carrier"] == "commercial" else MILITARY, "%s %s  %s → %s  %s nm%s" % (
+                         "Commercial" if leg["carrier"] == "commercial" else "Military",
+                         "flight" if leg.get("mode") == "air" else "ship", leg["from_name"], leg["to_name"],
+                         format(round(leg["length_nm"]), ","),
+                         ", %s in WEZ" % format(round(leg["wez_nm"]), ",") if leg["wez_nm"] >= 1 else "")))
     if handovers:
-        rows.append(("mark", HANDOVER, "Handover port, with the classes that change hands there"))
+        rows.append(("mark", HANDOVER, "Handover port or airfield, with the classes that change hands there"))
     if wez_spec:
         rows.append(("area", WEZ, "Weapons engagement zone: commercial carriers stay out"))
     if denial_spec:

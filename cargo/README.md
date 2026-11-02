@@ -88,15 +88,17 @@ onward movement.
 `checked_by` (who checked it, and how) and `note`. The script stops if a port or field name is wrong. Each rating lists
 any overridden fields it used, in its `overridden` column.
 
-The 13 overrides so far cover Apra Harbor, Manila, Subic Bay, Naha, Busan,
-Keppel (Singapore), Yokosuka and Honolulu. They come from port authority,
+The 15 overrides so far cover Apra Harbor, Manila, Subic Bay, Naha, Busan,
+Keppel (Singapore), Yokosuka, Honolulu and San Juan (Puerto Rico). They come from port authority,
 operator, trade press and port-listing pages found by Claude on 30 October
 2026. For 11 of them Claude read only the search engine's summary, not the page
 itself, as `checked_by` records; a person should open each link before the
 demo. The Yokosuka Ro-Ro entry rests on a secondary source and should be
 confirmed. The Honolulu cargo pier depth (11.0 m, where the World Port Index
 has 6.4 m) comes from a third-party port listing that gives no source or date;
-confirm it with Hawaii DOT Harbors. Diego Garcia, Sasebo,
+confirm it with Hawaii DOT Harbors. San Juan's maximum draft and container
+terminal come from the Puerto Nuevo terminal operator's page, fetched and
+quoted. Diego Garcia, Sasebo,
 Kao-Hsiung and Darwin were not researched and use the World Port Index alone.
 
 To add one, copy a row, fill in a source link, and rerun the script.

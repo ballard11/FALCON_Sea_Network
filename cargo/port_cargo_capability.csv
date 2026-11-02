@@ -30347,15 +30347,15 @@ WPI-15190,Talara,Small,VI,Personal demand items,unknown,facility unknown,contain
 WPI-15190,Talara,Small,VII,Major end items,unknown,facility unknown,roro,10.0,11.0,cargo pier depth,rail_access,,unknown fac_roro / lifts_100t_plus
 WPI-15190,Talara,Small,VIII,Medical supplies,unknown,facility unknown,container,11.0,11.0,cargo pier depth,services_electricity;medical_facilities;airport_nearby,,unknown fac_container
 WPI-15190,Talara,Small,IX,Repair parts,unknown,facility unknown,container,11.0,11.0,cargo pier depth,airport_nearby;rail_access,,unknown fac_container
-WPI-11110,San Juan,Small,I,Subsistence,ruled_out,too shallow,container,11.0,7.9,cargo pier depth,services_electricity;supply_provisions,,"cargo pier depth 7.9 m, ship needs 11 m"
-WPI-11110,San Juan,Small,II,Clothing and equipment,ruled_out,too shallow,container,11.0,7.9,cargo pier depth,services_longshoremen;lifts_0_24t,,"cargo pier depth 7.9 m, ship needs 11 m"
-WPI-11110,San Juan,Small,III,Petroleum,ruled_out,too shallow,tanker,11.0,7.9,cargo pier depth,supply_fuel_oil;supply_diesel;dirty_ballast_disposal,,"cargo pier depth 7.9 m, ship needs 11 m"
-WPI-11110,San Juan,Small,IV,Construction material,unknown,facility unknown,breakbulk,9.0,7.9,cargo pier depth,lifts_25_49t;lifts_50_100t;cranes_mobile;cranes_floating,,"unknown fac_breakbulk / fac_solid_bulk; depth marginal: cargo pier depth 7.9 m, ship needs 9 m"
-WPI-11110,San Juan,Small,V,Ammunition,unknown,never inferred,breakbulk,9.0,7.9,cargo pier depth,turning_area,,"unknown fac_dangerous_cargo_anchorage, fac_breakbulk / fac_container; this class is never inferred; depth marginal: cargo pier depth 7.9 m, ship needs 9 m"
-WPI-11110,San Juan,Small,VI,Personal demand items,ruled_out,too shallow,container,11.0,7.9,cargo pier depth,,,"cargo pier depth 7.9 m, ship needs 11 m"
-WPI-11110,San Juan,Small,VII,Major end items,ruled_out,too shallow,roro,10.0,7.9,cargo pier depth,cranes_floating;turning_area,,"cargo pier depth 7.9 m, ship needs 10 m"
-WPI-11110,San Juan,Small,VIII,Medical supplies,ruled_out,too shallow,container,11.0,7.9,cargo pier depth,services_electricity;medical_facilities;airport_nearby,,"cargo pier depth 7.9 m, ship needs 11 m"
-WPI-11110,San Juan,Small,IX,Repair parts,ruled_out,too shallow,container,11.0,7.9,cargo pier depth,airport_nearby,,"cargo pier depth 7.9 m, ship needs 11 m"
+WPI-11110,San Juan,Small,I,Subsistence,confirmed,all recorded Yes,container,11.0,11.6,max vessel draft,services_electricity;supply_provisions,fac_container;max_vessel_draft_m,has fac_container
+WPI-11110,San Juan,Small,II,Clothing and equipment,confirmed,all recorded Yes,container,11.0,11.6,max vessel draft,services_longshoremen;lifts_0_24t,fac_container;max_vessel_draft_m,has fac_container
+WPI-11110,San Juan,Small,III,Petroleum,unknown,facility unknown,tanker,11.0,11.6,max vessel draft,supply_fuel_oil;supply_diesel;dirty_ballast_disposal,max_vessel_draft_m,unknown fac_liquid_bulk / fac_oil_terminal
+WPI-11110,San Juan,Small,IV,Construction material,unknown,facility unknown,breakbulk,9.0,11.6,max vessel draft,lifts_25_49t;lifts_50_100t;cranes_mobile;cranes_floating,max_vessel_draft_m,unknown fac_breakbulk / fac_solid_bulk
+WPI-11110,San Juan,Small,V,Ammunition,unknown,never inferred,breakbulk,9.0,11.6,max vessel draft,turning_area,fac_container;max_vessel_draft_m,unknown fac_dangerous_cargo_anchorage; this class is never inferred
+WPI-11110,San Juan,Small,VI,Personal demand items,confirmed,all recorded Yes,container,11.0,11.6,max vessel draft,,fac_container;max_vessel_draft_m,has fac_container
+WPI-11110,San Juan,Small,VII,Major end items,confirmed,all recorded Yes,roro,10.0,11.6,max vessel draft,cranes_floating;turning_area,max_vessel_draft_m,has lifts_100t_plus
+WPI-11110,San Juan,Small,VIII,Medical supplies,confirmed,all recorded Yes,container,11.0,11.6,max vessel draft,services_electricity;medical_facilities;airport_nearby,fac_container;max_vessel_draft_m,has fac_container
+WPI-11110,San Juan,Small,IX,Repair parts,confirmed,all recorded Yes,container,11.0,11.6,max vessel draft,airport_nearby,fac_container;max_vessel_draft_m,has fac_container
 WPI-46310,Serpentina Terminal,Very Small,I,Subsistence,unknown,facility unknown,container,11.0,,,,,unknown fac_container / fac_breakbulk; no depth recorded
 WPI-46310,Serpentina Terminal,Very Small,II,Clothing and equipment,unknown,facility unknown,container,11.0,,,,,unknown fac_container / fac_breakbulk; no depth recorded
 WPI-46310,Serpentina Terminal,Very Small,III,Petroleum,unknown,facility unknown,tanker,11.0,,,,,unknown fac_liquid_bulk / fac_oil_terminal; no depth recorded
