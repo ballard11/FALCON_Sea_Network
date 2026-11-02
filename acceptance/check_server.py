@@ -32,6 +32,7 @@ CASES = os.path.join(HERE, "cases.json")
 GOLDEN = os.path.join(HERE, "golden.json")
 PORT_COUNT = 3806
 SPOT_PORTS = {"WPI-60390": (129.033333, 35.1)}   # Busan, a fixed point to check coordinates
+MALFORMED = (AttributeError, KeyError, TypeError)  # an answer that doesn't follow docs/API.md
 
 
 def length_ok(want, got):
@@ -42,6 +43,8 @@ def summarize(status, body):
     """The parts of a response the acceptance test compares."""
     if status != 200:
         return {"status": status, "has_error": isinstance(body, dict) and bool(body.get("error"))}
+    if not isinstance(body, dict):
+        return {"status": 200, "unreadable": "the answer is not a JSON object"}
     return {"status": 200,
             "blocked": body.get("blocked"),
             "original_nm": (body.get("original") or {}).get("length_nm"),
@@ -58,6 +61,8 @@ def compare(want, got):
         return ["HTTP status %s, expected %s" % (got["status"], want["status"])]
     if want["status"] != 200:
         return [] if got["has_error"] else ['the refusal has no "error" message']
+    if got.get("unreadable"):
+        return [got["unreadable"]]
     out = []
     wb, gb = want["blocked"], got["blocked"]
     if bool(wb) != bool(gb):
@@ -105,6 +110,8 @@ def check_ports(base):
     status, ports = http(base + "/api/ports")
     if status != 200 or not isinstance(ports, list):
         return ["GET /api/ports gave HTTP %s" % status]
+    if not all(isinstance(p, dict) for p in ports):
+        return ["GET /api/ports did not answer with a list of port objects"]
     out = []
     ids = [p.get("id") for p in ports]
     if len(ports) != PORT_COUNT:
@@ -139,6 +146,8 @@ def main(argv=None):
     except OSError as e:
         print("Cannot reach %s: %s" % (base, e))
         return 2
+    except MALFORMED as e:
+        problems = ["the port list doesn't follow docs/API.md (%s: %s)" % (type(e).__name__, e)]
     results.append({"id": "PORTS", "what": "GET /api/ports lists every port", "problems": problems, "seconds": 0})
     for case in cases:
         started = time.perf_counter()
@@ -147,6 +156,8 @@ def main(argv=None):
             problems = compare(golden[case["id"]], summarize(status, body))
         except OSError as e:
             problems = ["no answer: %s" % e]
+        except MALFORMED as e:
+            problems = ["the answer doesn't follow docs/API.md (%s: %s)" % (type(e).__name__, e)]
         results.append({"id": case["id"], "what": case["what"], "problems": problems,
                         "seconds": round(time.perf_counter() - started, 2)})
 

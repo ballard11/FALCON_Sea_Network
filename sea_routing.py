@@ -67,7 +67,11 @@ class PointSet:
 
     def near(self, p, radius_nm):
         dlat = int(radius_nm / 60) + 1
-        dlon = min(180, int(radius_nm / (60 * max(math.cos(math.radians(p[1])), 0.05))) + 1)
+        d = radius_nm / NM_RADIUS                     # the radius as an angle
+        if abs(p[1]) + math.degrees(d) >= 90:         # the circle takes in a pole: every longitude
+            dlon = 180
+        else:                                         # the widest longitude reached, exactly
+            dlon = min(180, int(math.degrees(math.asin(min(1.0, math.sin(d) / math.cos(math.radians(p[1])))))) + 1)
         cx, cy = math.floor(p[0]), math.floor(p[1])
         return any(great_circle_nm(p, q) <= radius_nm
                    for gy in range(cy - dlat, cy + dlat + 1)
@@ -128,23 +132,48 @@ class DenialArea:
         if self.contains(p) or self.contains(q):
             return True
         if self.kind == "circle":
-            kx = math.cos(math.radians(self.c[1])) * 60
-            ax, ay = (_unwrap(p[0], self.c[0]) - self.c[0]) * kx, (p[1] - self.c[1]) * 60
-            bx, by = (_unwrap(q[0], self.c[0]) - self.c[0]) * kx, (q[1] - self.c[1]) * 60
-            dx, dy = bx - ax, by - ay
-            den = dx * dx + dy * dy
-            t = 0.0 if den == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / den))
-            return math.hypot(ax + t * dx, ay + t * dy) <= self.r
+            # Both ends are outside. The piece enters only if the point of its
+            # great circle nearest the centre lies between p and q, within r.
+            # Exact on the globe: a flat approximation around the centre closed
+            # lanes hundreds of nm outside large circles at high latitudes.
+            a, b, c = _unit(p), _unit(q), _unit(self.c)
+            n = _cross(a, b)
+            size = math.sqrt(_dot(n, n))
+            if size == 0:
+                return False
+            n = tuple(x / size for x in n)
+            s = _dot(c, n)
+            foot = tuple(ci - s * ni for ci, ni in zip(c, n))
+            between = _dot(_cross(a, foot), n) >= 0 and _dot(_cross(foot, b), n) >= 0
+            return between and math.asin(min(1.0, abs(s))) * NM_RADIUS <= self.r
         a = (_unwrap(p[0], self.ref), p[1])
         b = (_unwrap(q[0], a[0]), q[1])
         return any(_segments_cross(a, b, e1, e2)
                    for e1, e2 in zip(self.poly, self.poly[1:] + self.poly[:1]))
 
 
+def _unit(p):
+    """(lon, lat) as a unit vector from the earth's centre."""
+    lon, lat = math.radians(p[0]), math.radians(p[1])
+    return (math.cos(lat) * math.cos(lon), math.cos(lat) * math.sin(lon), math.sin(lat))
+
+
+def _cross(u, v):
+    return (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+
+
+def _dot(u, v):
+    return u[0] * v[0] + u[1] * v[1] + u[2] * v[2]
+
+
 def _segments_cross(a, b, c, d):
     def side(p, q, r):
         return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
-    return side(a, b, c) * side(a, b, d) <= 0 and side(c, d, a) * side(c, d, b) <= 0
+    sc, sd = side(a, b, c), side(a, b, d)
+    if sc == 0 and sd == 0:      # on one line: they meet only if they overlap
+        return all(max(min(a[i], b[i]), min(c[i], d[i])) <= min(max(a[i], b[i]), max(c[i], d[i]))
+                   for i in (0, 1))
+    return sc * sd <= 0 and side(c, d, a) * side(c, d, b) <= 0
 
 
 def parse_wkt(wkt):
@@ -171,17 +200,17 @@ class SeaGraph:
         model fails its checks."""
         validate_data.check(data_dir)
         g = cls()
-        with open(os.path.join(data_dir, "nodes", "ports.csv"), encoding="utf-8") as f:
+        with open(os.path.join(data_dir, "nodes", "ports.csv"), encoding="utf-8-sig") as f:
             for r in csv.DictReader(f):
                 g.ports[r["port_id"]] = r
                 g.coords[r["port_id"]] = (float(r["lon"]), float(r["lat"]))
-        with open(os.path.join(data_dir, "nodes", "sea_nodes.csv"), encoding="utf-8") as f:
+        with open(os.path.join(data_dir, "nodes", "sea_nodes.csv"), encoding="utf-8-sig") as f:
             for r in csv.DictReader(f):
                 g.coords[r["sea_node_id"]] = (float(r["lon"]), float(r["lat"]))
         for name, a, b, kind in (("sea_segments.csv", "from_sea_node_id", "to_sea_node_id", "segment"),
                                  ("port_to_sea_node.csv", "port_id", "sea_node_id", "port_access"),
                                  ("port_to_port.csv", "from_port_id", "to_port_id", "port_to_port")):
-            with open(os.path.join(data_dir, "relationships", name), encoding="utf-8") as f:
+            with open(os.path.join(data_dir, "relationships", name), encoding="utf-8-sig") as f:
                 for i, r in enumerate(csv.DictReader(f)):
                     eid = f"{kind}:{i}"
                     g.edges[eid] = (r[a], r[b], float(r["length_nm"]), r["passage"] or None,

@@ -61,10 +61,16 @@ An area is a **circle** or a **polygon**:
 2. Take each pair of neighbouring points as one short piece. The link is closed
    if, for any piece and any area:
    - either end is inside the area, or
-   - **for a circle:** the piece comes within the radius of the centre,
-     measured flat around the centre. That means x = Δlon × cos(centre latitude) × 60
-     and y = Δlat × 60, in nm, with Δlon taken the short way round.
-   - **for a polygon:** the piece crosses any side. "Inside" uses the usual
+   - **for a circle:** the piece, taken as a short great-circle arc, comes
+     within the radius of the centre. Find the point of the piece's great
+     circle nearest the centre; if it lies between the piece's two ends, its
+     great-circle distance from the centre is the piece's distance.
+     (`DenialArea.crosses` in `sea_routing.py` does this with unit vectors.)
+     Don't measure it flat around the centre: on a large circle far from the
+     equator that closes lanes hundreds of miles outside it. v1.0 did, and
+     v1.1 fixed it without changing any acceptance answer.
+   - **for a polygon:** the piece crosses or touches any side. A piece in line
+     with a side but past its end does not count. "Inside" uses the usual
      ray-crossing test on longitudes unwrapped near the polygon.
 
 > **Pitfalls:** testing the straight line between two ports (it crosses land

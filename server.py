@@ -31,6 +31,7 @@ MAX_AREAS = 20
 MAX_POLYGON_POINTS = 200
 MAX_RADIUS_NM = 3000
 MAX_BODY_BYTES = 1_000_000
+REQUEST_TIMEOUT_S = 30     # a client that stops sending mid-request is dropped after this
 NOMINAL_KNOTS = 18          # only to turn extra distance into rough days
 
 print("loading sea network ...")
@@ -40,7 +41,7 @@ except DataError as e:
     raise SystemExit("Not starting: %s\nFix the rows above, or rebuild the data (see MIGRATION.md)." % e)
 GRAPH.links_in_areas([])    # build the area index now, not on the first request
 LOCK = threading.Lock()     # the graph's lazy caches aren't built for concurrent first use
-with open(os.path.join(HERE, "neo4j-datamodel", "nodes", "passages.csv"), encoding="utf-8") as f:
+with open(os.path.join(HERE, "neo4j-datamodel", "nodes", "passages.csv"), encoding="utf-8-sig") as f:
     PASSAGE_NAMES = {r["passage_id"]: r["name"] for r in csv.DictReader(f)}
 PORT_LIST = sorted(({"id": pid, "name": p["name"], "country": p["country"] or "",
                      "lat": float(p["lat"]), "lon": float(p["lon"]), "size": p["harbor_size"] or ""}
@@ -51,9 +52,14 @@ class BadRequest(Exception):
     pass
 
 
+def _is_number(v):
+    """An int or float, but not True/False, which JSON tells apart and Python doesn't."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
 def _lonlat(v):
     if not (isinstance(v, (list, tuple)) and len(v) == 2
-            and all(isinstance(x, (int, float)) and math.isfinite(x) for x in v)):
+            and all(_is_number(x) and math.isfinite(x) for x in v)):
         raise BadRequest("A point must be [longitude, latitude].")
     lon, lat = float(v[0]), float(v[1])
     if not -90 <= lat <= 90:
@@ -71,7 +77,7 @@ def parse_areas(raw):
         kind = a.get("type") if isinstance(a, dict) else None
         if kind == "circle":
             r = a.get("radius_nm")
-            if not isinstance(r, (int, float)) or not 0 < r <= MAX_RADIUS_NM:
+            if not _is_number(r) or not 0 < r <= MAX_RADIUS_NM:
                 raise BadRequest(f"A circle's radius must be between 0 and {MAX_RADIUS_NM} nm.")
             areas.append(DenialArea({"type": "circle", "center": _lonlat(a.get("center")), "radius_nm": r}))
         elif kind == "polygon":
@@ -92,12 +98,12 @@ def described(route, rank):
 
 def find_routes(body):
     origin, goal = body.get("from"), body.get("to")
-    if origin not in GRAPH.ports or goal not in GRAPH.ports:
+    if not all(isinstance(p, str) and p in GRAPH.ports for p in (origin, goal)):
         raise BadRequest("Unknown origin or destination port.")
     if origin == goal:
         raise BadRequest("Origin and destination are the same port.")
     k = body.get("k", 3)
-    if not isinstance(k, int) or not 1 <= k <= MAX_K:
+    if not isinstance(k, int) or isinstance(k, bool) or not 1 <= k <= MAX_K:
         raise BadRequest(f"K must be a whole number from 1 to {MAX_K}.")
     method = body.get("method", "yen")
     if method not in ("yen", "distinct"):
@@ -141,6 +147,7 @@ STATIC = {"/": ("web/index.html", "text/html; charset=utf-8"),
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    timeout = REQUEST_TIMEOUT_S
 
     def log_message(self, fmt, *args):
         pass
@@ -180,6 +187,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, find_routes(body))
         except (BadRequest, ValueError) as e:
             self.send_json(400, {"error": str(e)})
+        except TimeoutError:
+            self.close_connection = True
+            self.send_json(408, {"error": "The request body did not arrive in time."})
         except Exception as e:
             self.send_json(500, {"error": "%s: %s" % (type(e).__name__, e)})
 

@@ -175,7 +175,7 @@ python acceptance/check_server.py http://localhost:8100
 | `docs/ROUTING_RULES.md`, `docs/API.md` | The exact routing rules and the API contract |
 | `acceptance/` | The acceptance test: reference answers, checked against any server over HTTP |
 | `validate_data.py` | Checks the data model; the server runs it at start-up and refuses bad data |
-| `tests/` | Unit tests: the data checks, the rebuild, and the reference answers (`python -m unittest discover tests`) |
+| `tests/` | 204 tests of the reference code, 99% coverage (`python -m unittest discover tests`). See `tests/README.md` |
 | `tools/datamodel/build.py`, `data/` | Rebuilds `neo4j-datamodel/` from the public sources. See `data/README.md` |
 | `neo4j-datamodel/` | The data, ready to load into Neo4j. Start with `START_HERE.md`. |
 | `sea_routing.py` | Shortest path (A*), Yen's K shortest, and distinct corridors |

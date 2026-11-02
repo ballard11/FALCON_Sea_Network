@@ -34,14 +34,14 @@ Every port, sorted by name and then country:
 
 | Field | Required | Rule |
 |---|---|---|
-| `from`, `to` | yes | Port ids from `/api/ports`; must differ |
-| `k` | no, default 3 | A whole number from 1 to 5 |
+| `from`, `to` | yes | Port ids from `/api/ports`, as strings; must differ |
+| `k` | no, default 3 | A whole number from 1 to 5 (`true`, `2.0` and `"2"` are refused) |
 | `method` | no, default `yen` | `yen` or `distinct` (see `docs/ROUTING_RULES.md`) |
 | `areas` | no | Up to 20 areas of denial |
 | circle | | `center` is `[lon, lat]`; `radius_nm` is over 0 and at most 3,000 |
 | polygon | | `points` is 3 to 200 `[lon, lat]` corners |
 
-Points are `[longitude, latitude]`: finite numbers, latitude from −90 to 90.
+Points are `[longitude, latitude]`: finite numbers (not `true` or `false`), latitude from −90 to 90.
 Longitude may be any value; it is wrapped into −180 to 180. The body may be at
 most 1,000,000 bytes.
 
@@ -91,6 +91,7 @@ to destination).
 |---|---|---|
 | 400 | Any rule above broken, the body missing, too large or not a JSON object, or the ports not connected at all | `{"error": "<what is wrong, in plain words>"}` |
 | 404 | Any other path | plain text |
+| 408 | The client stopped sending the body for 30 seconds | `{"error": "..."}`, then the connection is closed |
 | 500 | An unexpected failure | `{"error": "..."}`. See `MIGRATION.md`: don't copy how the reference fills this in |
 
 The acceptance test checks the status and that a 400 carries an `error`

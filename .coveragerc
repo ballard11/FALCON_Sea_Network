@@ -1,0 +1,12 @@
+# Test coverage of the reference code:  see tests/README.md
+[run]
+branch = True
+source = .
+omit =
+    tests/*
+patch = subprocess
+data_file = ${TEMP-/tmp}/falcon-coverage/.coverage
+
+[report]
+skip_empty = True
+precision = 0

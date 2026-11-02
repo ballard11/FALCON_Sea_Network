@@ -89,6 +89,22 @@ The reference is a prototype. Fix these in your version, don't carry them over:
 | The map page has no error handling when a request fails, and puts text into the page without escaping it | Show the error; escape everything that comes from data |
 | No restart if the process stops | Runs as a service and comes back after a reboot |
 
+## Changes since v1.0
+
+v1.1 adds a full test suite (`tests/README.md`) and fixes what it found.
+**No acceptance answer changed**, so `golden.json` is the same target.
+
+| Fixed | Effect in v1.0 | What your version should do |
+|---|---|---|
+| Circles were tested flat around their centre | Large circles far from the equator closed lanes up to 426 nm outside them | Test each piece exactly on the globe: `docs/ROUTING_RULES.md` section 3 |
+| A lane piece in line with a polygon side, but past its end, counted as crossing it | A lane could be closed by a side it never reached | Count a side only where the piece actually meets it |
+| Distinct corridors looked too narrowly for nearby routes close to the poles | Two routes over the Arctic could be kept as different corridors when they weren't | Search every longitude once the separation reaches a pole |
+| `from` or `to` sent as a list or object | HTTP 500 | HTTP 400 |
+| `k`, a radius or a coordinate sent as `true` or `false` | Accepted as 1 or 0 | HTTP 400 |
+| A client that stopped sending part-way through a request | Held a connection open forever | Drop it after 30 seconds (HTTP 408) |
+| A data file saved with a byte order mark (Excel does this) | Passed the data checks, then the server failed to start | Accept it |
+| The acceptance checker, given a garbled answer | Crashed | Reports the case as failed |
+
 ## Suggested month
 
 | Week | Finish line, something you can show |
