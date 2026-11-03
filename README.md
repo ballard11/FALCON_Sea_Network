@@ -130,6 +130,31 @@ in the data or the routing shows up. The command exits with 1 if any check
 fails, so it can run in CI. To add a scenario, copy a file in `scenarios/`;
 [scenarios/README.md](scenarios/README.md) lists every field and expectation.
 
+### A brief for stakeholders
+
+The report is for the people who build FALCON. For readers outside the team,
+
+```bash
+python make_brief.py
+```
+
+writes `brief.html` and `brief.pdf` into the newest run's folder:
+
+- a table of what each closure costs, in distance and time;
+- one page per scenario, with a map and a sentence on the result;
+- the assumptions, limits and data sources.
+
+The brief leaves out the test detail. It reads only that run's results, so it
+always matches a tested run, and it refuses a run in which any scenario failed.
+
+| Option | What it does |
+|---|---|
+| `python make_brief.py reports/<run>` | Briefs a particular run |
+| `--note "..."` | Puts a paragraph of your own at the top |
+| `--no-pdf` | Writes the HTML only |
+
+The PDF needs Edge or Chrome. Edit `LIMITS` in `make_brief.py` as the model changes.
+
 ## API
 
 `server.py` answers two requests:
@@ -175,13 +200,14 @@ python acceptance/check_server.py http://localhost:8100
 | `docs/ROUTING_RULES.md`, `docs/API.md` | The exact routing rules and the API contract |
 | `acceptance/` | The acceptance test: reference answers, checked against any server over HTTP |
 | `validate_data.py` | Checks the data model; the server runs it at start-up and refuses bad data |
-| `tests/` | 204 tests of the reference code, 99% coverage (`python -m unittest discover tests`). See `tests/README.md` |
+| `tests/` | 238 tests of the reference code, 99% coverage (`python -m unittest discover tests`). See `tests/README.md` |
 | `tools/datamodel/build.py`, `data/` | Rebuilds `neo4j-datamodel/` from the public sources. See `data/README.md` |
 | `neo4j-datamodel/` | The data, ready to load into Neo4j. Start with `START_HERE.md`. |
 | `sea_routing.py` | Shortest path (A*), Yen's K shortest, and distinct corridors |
 | `server.py` | A small web server for the map |
 | `web/` | The map page, with d3-geo and the Natural Earth coastline |
 | `run_scenarios.py` | Runs the scenarios, checks the answers, writes the report |
+| `make_brief.py` | Turns a passed run into a short brief for stakeholders |
 | `map_snapshot.py` | Draws a scenario's map as SVG (and PNG) |
 | `scenarios/` | The test scenarios, one JSON file each |
 

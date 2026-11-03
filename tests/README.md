@@ -4,7 +4,7 @@
 python -m unittest discover tests
 ```
 
-Runs every test in about 40 seconds. It needs Python 3.8 or later and nothing
+Runs all 238 tests in about 40 seconds. It needs Python 3.8 or later and nothing
 else. The tests also run under pytest (`python -m pytest tests`) if you
 prefer it, but nothing here depends on it.
 
@@ -22,6 +22,7 @@ repository. To check a migrated server, use the acceptance test instead
 | `test_check_server.py` | The acceptance checker judges answers by the rules in `acceptance/README.md`, and reports a broken, garbled or silent server as a failure instead of crashing. Also `make_golden.py` |
 | `test_acceptance.py` | The reference still gives the answers in `acceptance/golden.json` |
 | `test_scenarios.py` | The scenario runner and its map pictures: each check, whole runs into a throwaway folder, broken scenario files, and escaping in the report |
+| `test_brief.py` | The stakeholder brief: its wording, the sentence for each kind of answer, numbers that add up on the page, refusing failed runs, and a real run from scenarios to brief |
 | `test_build.py` | The data rebuilds byte for byte from `data/`; the build's helpers; `tools/datamodel/check_routes.py` |
 | `toy_network.py` | Not a test: a five-port network, small enough to check by hand, written as a real data model folder |
 
@@ -39,7 +40,7 @@ python -m coverage report
 
 `coverage` is a test tool only; the app doesn't need it. `.coveragerc` sets
 it up, and includes the build, which the tests run as a separate process.
-With coverage on, a run takes about 95 seconds. Results at v1.1:
+With coverage on, a run takes about 95 seconds. Results at v1.2:
 
 | Module | Lines and branches covered |
 |---|---|
@@ -50,6 +51,7 @@ With coverage on, a run takes about 95 seconds. Results at v1.1:
 | `acceptance/make_golden.py` | 95% |
 | `run_scenarios.py` | 98% |
 | `map_snapshot.py` | 99% |
+| `make_brief.py` | 98% |
 | `tools/datamodel/build.py` | 99% |
 | `tools/datamodel/check_routes.py` | 98% |
 | **All** | **99%** |
