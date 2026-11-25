@@ -33,6 +33,7 @@ arrive-by date. To add a comparison, write lens(planner, scenario) returning
 {"columns": [{"id", "label", "sub"}], "rows": [{"class", "name", "short_tons",
 "cells": {column_id: cell}}], "legs": {key: leg}} and add it to LENSES.
 """
+import copy
 import math
 
 from cargo_movement import FLAG_NAMES
@@ -102,11 +103,15 @@ def _row(P, item, cells):
     return {"class": cid, "name": P.classes[cid]["name"], "short_tons": item.get("short_tons"), "cells": cells}
 
 
-def _close(P, s, rows, legs):
-    """Closure for every cell: everything by sea, and everything by air, each pooled."""
+def _closed(P, s):
     g = P.g
     dc = g.links_in_areas(s["denial"]) if s["denial"] else frozenset()
-    closed = {"military": dc, "commercial": dc | (g.links_in_areas(s["wez"]) if s["wez"] else frozenset())}
+    return {"military": dc, "commercial": dc | (g.links_in_areas(s["wez"]) if s["wez"] else frozenset())}
+
+
+def _close(P, s, rows, legs):
+    """Closure for every cell: everything by sea, and everything by air, each pooled."""
+    closed = _closed(P, s)
     LIFT.close(P, {"sea": [(i["class"], i.get("short_tons"), sea) for i, sea, _ in rows],
                    "air": [(i["class"], i.get("short_tons"), air) for i, _, air in rows]}, legs, s.get("lift"), closed)
 
@@ -118,6 +123,59 @@ def by_mode(P, s):
     return {"columns": [{"id": "sea", "label": "By sea", "sub": "port to port"},
                         {"id": "air", "label": "By air", "sub": "or air, then sea"}],
             "rows": [_row(P, item, {"sea": sea, "air": air}) for item, sea, air in rows], "legs": legs}
+
+
+def by_plan(P, s):
+    """The baseline movement plan: each class on its normal mode (lift_rules.json), or
+    the mode a what-if sets in s["modes"]; all classes share ships, aircraft, ports and
+    airfields. One column, "plan". Each cell adds "chosen" (the mode asked for),
+    "fallback" (why it went the other way, when the mode asked for can't be used) and
+    "switch" (the other mode, when it's available).
+
+    "levers" are the same plan re-run with one change each, so the screen can show
+    what would move the answer without choosing: "switch" moves one class to its
+    other mode; "more" adds one of a lift type at the origin, ready on D+0. Each gives
+    "last" (the day the last ton of the whole plan is in, None if some class can't
+    get there with the lift on hand) and, for a switch, what the class then uses."""
+    rows, legs = _ways(P, s, s["goal"])
+    closed = _closed(P, s)
+    modes = dict(LIFT.normal_mode, **(s.get("modes") or {}))
+
+    def run(modes, lift):
+        picked = []
+        for item, sea, air in rows:
+            want = modes.get(item["class"], "sea")
+            c, other = (air, sea) if want == "air" else (sea, air)
+            fallback = None
+            if not c["available"] and other["available"]:
+                fallback = "%s, so it goes by %s." % ((c["why"] or "No way by " + want).rstrip("."),
+                                                        "sea" if other["mode"] == "sea" else "air")
+                c, other = other, c
+            c = dict(copy.deepcopy(c), chosen=want, fallback=fallback,
+                     switch=other["mode"] if other["available"] else None)
+            picked.append((item["class"], item.get("short_tons"), c))
+        LIFT.close(P, {"plan": picked}, legs, lift, closed)
+        return picked
+
+    def last(picked):
+        days = [c["closure"] for _, _, c in picked]
+        return None if any(d is None for d in days) else max(days, default=0.0)
+
+    plan = run(modes, s.get("lift"))
+    switch, more = {}, {}
+    for cid, _, c in plan:
+        if c["switch"]:
+            flipped = run(dict(modes, **{cid: "sea" if c["mode"] != "sea" else "air"}), s.get("lift"))
+            alt = next(x for x in flipped if x[0] == cid)[2]
+            switch[cid] = {"to": alt["mode"], "last": last(flipped), "lift": alt["lift"]}
+    for t in sorted({c["lift"]["type"] for _, _, c in plan if c.get("lift")}):
+        groups = LIFT.groups(s.get("lift"))
+        groups[t] = groups[t] + [{"count": 1, "at": None, "ready": 0.0}]
+        more[t] = {"last": last(run(modes, groups))}
+    by_class = {cid: c for cid, _, c in plan}
+    return {"columns": [{"id": "plan", "label": "Plan", "sub": "each class on its normal mode"}],
+            "rows": [_row(P, item, {"plan": by_class[item["class"]]}) for item, _, _ in rows], "legs": legs,
+            "modes": modes, "levers": {"last": last(plan), "switch": switch, "more": more}}
 
 
 def alternate_ports(P, s, radius_nm=POD_RADIUS_NM, n=POD_ALTERNATES):
@@ -164,6 +222,9 @@ def by_port(P, s):
 
 
 LENSES = {
+    "plan": {"label": "Plan", "run": by_plan,
+             "note": "Each class on its normal mode, all sharing ships, aircraft, ports and airfields. The levers re-run "
+                     "the plan with one change each; none is chosen for you."},
     "mode": {"label": "Mode", "run": by_mode,
              "note": "By sea against by air. By air flies the whole way, or flies part way and goes on by sea "
                      "when no flight reaches the far end."},

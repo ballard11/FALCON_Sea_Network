@@ -55,6 +55,15 @@
       }
     }
   },
+  "plan": {
+    "_note": "The baseline movement plan: each class's normal mode, before any what-if changes it. Who flies it (commercial or military aircraft) comes from air_rules.json. Fuel is shown in gallons as well as short tons.",
+    "normal_mode": {"I": "air", "II": "air", "III": "sea", "IV": "sea", "V": "air", "VI": "air", "VII": "sea", "VIII": "air", "IX": "air"},
+    "fuel_lb_per_gal": 6.7,
+    "sources": {
+      "normal_mode": "illustrative: after a Gemini summary of how planners split a manifest between sealift and airlift (fuel and heavy cargo by sea; rations, spares, personal items and medical by commercial air; ammunition by military air), unverified. Class VIII by any aircraft, as in air_rules.json, pending Ben's call",
+      "fuel_lb_per_gal": "illustrative: about 6.7 lb a gallon for military jet fuel, from the same Gemini summary, unverified"
+    }
+  },
   "ports": {
     "_note": "Short tons a day a port can load or discharge, by World Port Index harbor size (the WPI has no rates). '' is a port with no size.",
     "rate_st_per_day": {"Large": 4000, "Medium": 2000, "Small": 800, "Very Small": 300, "": 300},

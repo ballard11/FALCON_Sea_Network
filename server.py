@@ -16,7 +16,7 @@ Python 3, stdlib only. All routing lives in sea_routing.py.
                                "cargo": [{"class": "I", "short_tons": 500}, ...], "priority": "urgent"}
                               areas of denial close the water to everyone, a WEZ to
                               commercial carriers only; see cargo_movement.py
-    POST /api/compare         {"from", "to", "cargo", "areas", "wez", "lens": "mode" | "pod", "lift": {type: count},
+    POST /api/compare         {"from", "to", "cargo", "areas", "wez", "lens": "plan" | "mode" | "pod", "lift": {type: count}, "modes": {class: "sea" | "air"},
                                "base": {"areas": [...], "wez": [...], "lift": {...}}}   the planner screen's grid,
                               for this situation and the baseline's; see comparisons.py
 """
@@ -222,7 +222,7 @@ def find_compare(body):
     "areas" and "wez" and, when "base" ({"areas", "wez"}) is given, for the
     baseline situation too. See comparisons.py."""
     origin, goal = parse_move(body)
-    lens = body.get("lens", "mode")
+    lens = body.get("lens", "plan")
     if lens not in comparisons.LENSES:
         raise BadRequest("lens must be one of: " + ", ".join(comparisons.LENSES) + ".")
     cargo = parse_cargo(body) or PLANNER.default_cargo()
@@ -247,14 +247,20 @@ def find_compare(body):
                              "1,000, ready 0 to 90 days, types: " + ", ".join(known) + ".")
         return lift
 
-    lift = parse_lift(body.get("lift"))
+    def parse_modes(modes):
+        if modes is not None and not (isinstance(modes, dict) and all(
+                k in PLANNER.classes and v in ("sea", "air") for k, v in modes.items())):
+            raise BadRequest('modes must be {class: "sea" | "air"}.')
+        return modes
+
+    lift, modes = parse_lift(body.get("lift")), parse_modes(body.get("modes"))
     base = body.get("base")
     if base is not None and not isinstance(base, dict):
         raise BadRequest("base must be {\"areas\": [...], \"wez\": [...], \"lift\": {...}}.")
 
-    def run(raw_areas, raw_wez, lift):
-        key = json.dumps([lens, origin, goal, cargo, countries, lift, raw_areas or [], raw_wez or []], sort_keys=True)
-        s = {"origin": origin, "goal": goal, "cargo": cargo, "countries": countries, "lift": lift,
+    def run(raw_areas, raw_wez, lift, modes):
+        key = json.dumps([lens, origin, goal, cargo, countries, lift, modes, raw_areas or [], raw_wez or []], sort_keys=True)
+        s = {"origin": origin, "goal": goal, "cargo": cargo, "countries": countries, "lift": lift, "modes": modes,
              "denial": parse_areas(raw_areas), "wez": parse_areas(raw_wez)}
         with LOCK:
             if key not in COMPARED:
@@ -264,8 +270,9 @@ def find_compare(body):
             return COMPARED[key]
 
     started = time.perf_counter()
-    out = dict(run(body.get("areas"), body.get("wez"), lift))
-    out["base"] = run(base.get("areas"), base.get("wez"), parse_lift(base.get("lift"))) if base is not None else None
+    out = dict(run(body.get("areas"), body.get("wez"), lift, modes))
+    out["base"] = (run(base.get("areas"), base.get("wez"), parse_lift(base.get("lift")), parse_modes(base.get("modes")))
+                   if base is not None else None)
     out["ms"] = round((time.perf_counter() - started) * 1000)
     return out
 

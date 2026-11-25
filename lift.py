@@ -57,6 +57,8 @@ class Lift:
         self.aircraft = _public(rules["aircraft"])
         self.ship_for = {c: t for t, s in self.ships.items() for c in s["classes"]}
         self.port_rate = rules["ports"]["rate_st_per_day"]
+        self.normal_mode = _public(rules["plan"]["normal_mode"])
+        self.fuel_lb_per_gal = rules["plan"]["fuel_lb_per_gal"]
         self.mog = rules["airfields"]["working_mog"]
 
     @classmethod
@@ -83,7 +85,8 @@ class Lift:
                           for t, s in self.ships.items()},
                 "aircraft": {t: {k: a[k] for k in ("name", "planning_payload_st", "ground_hours", "count")}
                              for t, a in self.aircraft.items()},
-                "port_rate_st_per_day": self.port_rate, "working_mog": self.mog}
+                "port_rate_st_per_day": self.port_rate, "working_mog": self.mog,
+                "normal_mode": self.normal_mode, "fuel_lb_per_gal": self.fuel_lb_per_gal}
 
     # ------------------------------------------------------------------ close
     def close(self, P, columns, legs, lift=None, closed=None):
