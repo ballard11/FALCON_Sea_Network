@@ -226,6 +226,8 @@ route, `extra_nm`, and `blocked` with a reason when no route is possible.
 | Path | What it is |
 |---|---|
 | `neo4j-datamodel/` | The data, ready to load into Neo4j. Start with `START_HERE.md`. |
+| `falcon_data.py` | The data layer: the one place that reads data files, gives each planning figure its source, and checks the files agree. `python falcon_data.py` checks them |
+| `lift.py`, `comparisons.py` | Closure (when the last ton arrives, with the lift on hand) and the planner screen's views: Plan, Sea vs air, Nearby ports |
 | `sea_routing.py` | Shortest path (A*), Yen's K shortest, and distinct corridors |
 | `server.py` | A small web server for the map |
 | `web/` | The map page, with d3-geo and the Natural Earth coastline |
@@ -239,6 +241,27 @@ route, `extra_nm`, and `blocked` with a reason when no route is possible.
 
 To use the data in Neo4j instead, follow `neo4j-datamodel/START_HERE.md`.
 `neo4j-datamodel/ASSUMPTIONS.md` lists every filter, default and known gap.
+
+### How the data is organised
+
+There are two kinds of data, kept apart on purpose:
+
+| Kind | What | Where | Changed by |
+|---|---|---|---|
+| Reference data | Ports, airfields, runways, sea lanes, passages | `neo4j-datamodel/` (the Neo4j data model; the app reads its CSV export) | Rebuilding the package from NGA, OurAirports and Eurostat |
+| Planning factors | Ship and aircraft types, payloads, port rates, allowances, which class flies | `cargo/*.json`, `cargo/port_rates.csv` | Editing one line; no code change |
+
+The app doesn't need a running Neo4j database: routing with closures runs in
+memory (see `neo4j-datamodel/README.md`, "Sea routing"). No module opens a data
+file itself; each asks `falcon_data.STORE`, so reading from a Neo4j database
+instead means writing one store with the same methods.
+
+Every planning figure has a source, under `"_sources"` in the block that holds it:
+`{"status", "source", "url", "checked"}`. The status is `sourced` (read from a
+page that was opened), `unverified` (a source is named but its page wasn't
+opened) or `illustrative` (chosen for the demo; not a planning factor). The
+server won't start if a figure has no source or the files disagree, and the
+Plan view lists the figures each answer rests on, with their status.
 
 ## Data sources and licences
 

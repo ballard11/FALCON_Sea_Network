@@ -38,8 +38,9 @@ async function goCargo(fit) {
   if (!cargo.length) { msg.className = "err"; msg.textContent = "Pick at least one class of supply."; cmp = null; renderCompare(); drawCargo(); return; }
   const split = list => ({ areas: plain(list.filter(a => a.kind !== "wez")), wez: plain(list.filter(a => a.kind === "wez")) });
   const body = { from: currentFrom, to: currentTo, cargo, lens, ...split(turns[cur].areas), lift: liftBody(turns[cur]),
-                 modes: turns[cur].modes,
-                 base: cur === base ? null : { ...split(turns[base].areas), lift: liftBody(turns[base]), modes: turns[base].modes } };
+                 modes: turns[cur].modes, port_rates: turns[cur].port_rates || {},
+                 base: cur === base ? null : { ...split(turns[base].areas), lift: liftBody(turns[base]), modes: turns[base].modes,
+                                               port_rates: turns[base].port_rates || {} } };
   msg.className = ""; msg.textContent = "";
   el("csum").textContent = "Working it out...";
   const ticket = ++pending;
@@ -96,7 +97,8 @@ function loadScenario(id) {
   el("from").value = labelOf[sc.from]; el("to").value = labelOf[sc.to];
   // A scenario's areas become What-if 1, against a Start with none: the change they make is the point.
   const own = [...sc.areas.map(a => ({ kind: "denial", ...a })), ...sc.wez.map(a => ({ kind: "wez", ...a }))];
-  turns = own.length ? [{ areas: [], lift: {}, modes: {} }, { areas: own, lift: {}, modes: {} }] : [{ areas: [], lift: {}, modes: {} }];
+  const blank = areas => ({ areas, lift: {}, modes: {}, port_rates: {} });
+  turns = own.length ? [blank([]), blank(own)] : [blank([])];
   base = 0; cur = turns.length - 1; areas = turns[cur].areas; picked = null;
   tons = Object.fromEntries(meta.classes.map(c => [c.id, c.short_tons]));
   for (const c of meta.classes) el("cls-" + c.id).checked = false;
@@ -250,12 +252,17 @@ async function boot() {
   el("resetLift").onclick = () => { turns[cur].lift = {}; liftChanged(); };
   renderLiftLine();
   el("due").oninput = () => { const v = Math.round(+el("due").value); if (v >= 1) { due = v; renderCompare(); } };
-  for (const l of meta.lenses) el("lens").appendChild(new Option(l.label, l.id));
-  el("lens").value = lens;
-  el("lens").onchange = () => { lens = el("lens").value; picked = null; document.body.classList.toggle("plan-lens", lens === "plan"); go(true); };
+  // The views, as one row of buttons: all three visible, the current one marked.
+  for (const l of meta.lenses) {
+    const b = document.createElement("button");
+    b.textContent = l.short; b.dataset.lens = l.id; b.title = l.note; b.classList.toggle("on", l.id === lens);
+    b.onclick = () => { if (lens === l.id) return; lens = l.id; picked = null; document.body.classList.toggle("plan-lens", lens === "plan"); go(true); };
+    el("lens").appendChild(b);
+  }
   document.body.classList.toggle("plan-lens", lens === "plan");
   el("addTurn").onclick = () => {
-    turns.push({ areas: areas.map(a => ({ ...a })), lift: JSON.parse(JSON.stringify(turns[cur].lift)), modes: { ...turns[cur].modes }, why: { ...(turns[cur].why || {}) } });
+    turns.push({ areas: areas.map(a => ({ ...a })), lift: JSON.parse(JSON.stringify(turns[cur].lift)), modes: { ...turns[cur].modes },
+                 port_rates: { ...(turns[cur].port_rates || {}) }, why: { ...(turns[cur].why || {}) } });
     cur = turns.length - 1; areas = turns[cur].areas; picked = null;
     setMode(null); drawAreas(); go();
   };

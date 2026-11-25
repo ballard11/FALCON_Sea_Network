@@ -19,8 +19,9 @@ import math
 import os
 from collections import defaultdict
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-DATA = os.path.join(HERE, "neo4j-datamodel")
+from falcon_data import STORE
+
+DATA = STORE.ref_dir
 NM_RADIUS = 6371.0088 / 1.852        # Earth's mean radius in nm, as the build used
 
 

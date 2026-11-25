@@ -9,11 +9,11 @@
       "range_nm": 5000,
       "cruise_kt": 480,
       "min_runway_ft": 9000,
-      "sources": {
-        "payload_st": "Boeing, https://www.boeing.com/commercial/freighters : 107 tonnes maximum structural payload (= 118 short tons). Claude (page fetched and quoted), 2026-10-30",
-        "range_nm": "Boeing, same page: 5,000 nmi with a 107-tonne payload. Claude (page fetched and quoted), 2026-10-30",
-        "cruise_kt": "Working value chosen by Claude; the Boeing page gives no speed. Check before relying on it",
-        "min_runway_ft": "Working value chosen by Claude; no sourced figure found. Boeing's airport planning documents give the real figure for a weight and temperature"
+      "_sources": {
+        "payload_st": {"status": "sourced", "source": "Boeing freighters page: 107 tonnes maximum structural payload (= 118 short tons); page fetched and quoted", "url": "https://www.boeing.com/commercial/freighters", "checked": "2026-10-30"},
+        "range_nm": {"status": "sourced", "source": "Boeing freighters page: 5,000 nmi with a 107-tonne payload; page fetched and quoted", "url": "https://www.boeing.com/commercial/freighters", "checked": "2026-10-30"},
+        "cruise_kt": {"status": "illustrative", "source": "Chosen for the demo; the Boeing page gives no speed"},
+        "min_runway_ft": {"status": "illustrative", "source": "Chosen for the demo; Boeing's airport planning documents give the real figure for a weight and temperature"}
       }
     },
     "military": {
@@ -22,11 +22,11 @@
       "range_nm": 2400,
       "cruise_kt": 450,
       "min_runway_ft": 3500,
-      "sources": {
-        "payload_st": "US Air Force C-17 fact sheet: maximum payload 170,900 lb (= 85 short tons). Claude (web search summary; af.mil refused the page), 2026-10-30",
-        "range_nm": "445th Airlift Wing C-17 fact sheet: about 2,400 nm unrefueled with a 169,000 lb payload. Claude (web search summary; page not opened), 2026-10-30",
-        "cruise_kt": "Air Mobility Command C-17 fact sheet: 450 knots at 28,000 ft. Claude (web search summary; page not opened), 2026-10-30",
-        "min_runway_ft": "Dover AFB and National Museum of the US Air Force C-17 fact sheets: runways as short as 3,500 ft. Claude (web search summary; pages not opened), 2026-10-30"
+      "_sources": {
+        "payload_st": {"status": "unverified", "source": "US Air Force C-17 fact sheet: maximum payload 170,900 lb (= 85 short tons); web search summary, af.mil refused the page", "checked": "2026-10-30"},
+        "range_nm": {"status": "unverified", "source": "445th Airlift Wing C-17 fact sheet: about 2,400 nm unrefueled with a 169,000 lb payload; web search summary, page not opened", "checked": "2026-10-30"},
+        "cruise_kt": {"status": "unverified", "source": "Air Mobility Command C-17 fact sheet: 450 knots at 28,000 ft; web search summary, page not opened", "checked": "2026-10-30"},
+        "min_runway_ft": {"status": "unverified", "source": "Dover AFB and National Museum of the US Air Force C-17 fact sheets: runways as short as 3,500 ft; web search summary, pages not opened", "checked": "2026-10-30"}
       }
     }
   },
@@ -41,7 +41,8 @@
     "VI": "any",
     "VII": "military",
     "VIII": "any",
-    "IX": "any"
+    "IX": "any",
+    "_sources": {"*": {"status": "illustrative", "source": "Judgements by Claude for the demo, for a planner to review"}}
   },
 
   "handling": {
@@ -49,12 +50,14 @@
     "ship_port_days": 1.0,
     "airfield_hours": 4.0,
     "refuel_stop_hours": 2.0,
-    "road_kt": 25.0
+    "road_kt": 25.0,
+    "_sources": {"*": {"status": "illustrative", "source": "Chosen for the demo"}}
   },
 
   "airfields": {
     "_note": "The airfield used for a port is the nearest one, within max_road_nm, with a long enough runway. Refuelling stops and handovers use only airfields in these countries (ISO codes, as in airfields.csv). country_codes maps the names in movement_rules.json to those codes. Air handover ports need a runway long enough for both aircraft.",
     "max_road_nm": 100,
+    "_sources": {"max_road_nm": {"status": "illustrative", "source": "Chosen for the demo"}},
     "stop_countries": ["US", "GU", "MP", "UM", "JP", "KR", "PH", "AU", "SG", "PW", "FM", "MH", "PG", "PR"],
     "country_codes": {
       "United States": "US", "Guam": "GU", "Northern Mariana Islands": "MP", "Japan": "JP", "South Korea": "KR",

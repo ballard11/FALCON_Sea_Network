@@ -18,12 +18,11 @@ import bisect
 import csv
 import heapq
 import math
-import os
 
+from falcon_data import STORE
 from sea_routing import NM_RADIUS, densify, great_circle_nm
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-AIRFIELDS = os.path.join(HERE, "neo4j-datamodel", "nodes", "airfields.csv")
+AIRFIELDS = STORE.ref_path("nodes", "airfields.csv")
 SEARCH_STRETCH = 2.0        # stops are looked for within this many times the direct distance ...
 SEARCH_EXTRA_NM = 1500.0    # ... or this much further, whichever is more
 

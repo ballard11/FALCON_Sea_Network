@@ -7,12 +7,14 @@
     "roro":      {"name": "Ro-Ro vehicle carrier", "draft_m": 10.0},
     "tanker":    {"name": "Product tanker", "draft_m": 11.0},
     "breakbulk": {"name": "General cargo / breakbulk ship", "draft_m": 9.0},
-    "bulk":      {"name": "Dry bulk carrier", "draft_m": 10.0}
+    "bulk":      {"name": "Dry bulk carrier", "draft_m": 10.0},
+    "_sources": {"*.draft_m": {"status": "illustrative", "source": "Nominal figure chosen for the demo, not a specific ship class"}}
   },
 
   "depth": {
     "_note": "WPI depths are banded: most are the lower edge of a 5 ft (1.5 m) range, e.g. 9.4 m is 31-35 ft, and tide is not counted. A port up to this much shallower than the draft is marginal (Inferred), not ruled out.",
-    "marginal_m": 2.0
+    "marginal_m": 2.0,
+    "_sources": {"marginal_m": {"status": "illustrative", "source": "Chosen for the demo"}}
   },
 
   "inference_defaults": {

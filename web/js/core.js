@@ -40,7 +40,7 @@ let appMode = "routes", drawKind = "denial", meta = null, tons = {}, labelOf = {
 let opts = null, routeView = "sea";     // Routes: the transport options (by sea, by air), and which one the map shows
 // Cargo: turns change the situation (areas); the move (ports, cargo, arrive-by) stays the same across turns.
 // `areas` is always the current turn's own list. cmp is the comparison for the current turn (and its baseline).
-let turns = [{ areas, lift: {}, modes: {} }], cur = 0, base = 0, lens = "plan", due = 7, cmp = null, picked = null, hoverRow = null;
+let turns = [{ areas, lift: {}, modes: {}, port_rates: {} }], cur = 0, base = 0, lens = "plan", due = 7, cmp = null, picked = null, hoverRow = null;
 const denialAreas = () => areas.filter(a => a.kind !== "wez");
 const wezAreas = () => areas.filter(a => a.kind === "wez");
 const plain = list => list.map(({ kind, ...a }) => a);

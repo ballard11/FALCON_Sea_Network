@@ -13,16 +13,17 @@ Stdlib only. The rules are explained in cargo/README.md.
 """
 import csv
 import hashlib
-import json
 import os
 import sys
 from collections import Counter
 
+from falcon_data import STORE
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-PORTS = os.path.join(HERE, "neo4j-datamodel", "nodes", "ports.csv")
-RULES = os.path.join(HERE, "cargo", "cargo_classes.json")
-OVERRIDES = os.path.join(HERE, "cargo", "port_overrides.csv")
-OUT = os.path.join(HERE, "cargo", "port_cargo_capability.csv")
+PORTS = STORE.ref_path("nodes", "ports.csv")
+RULES = STORE.rules_path("cargo_classes")
+OVERRIDES = os.path.join(STORE.rules_dir, "port_overrides.csv")
+OUT = os.path.join(STORE.rules_dir, "port_cargo_capability.csv")
 
 HARBOR_RANK = {"Very Small": 0, "Small": 1, "Medium": 2, "Large": 3}
 STATUSES = ("confirmed", "inferred", "unknown", "ruled_out")
@@ -152,8 +153,7 @@ def rate(port, cls, rules):
 
 def rate_all(overrides=True):
     """Every port rated for every class: (rules, ports, rows, overrides applied)."""
-    with open(RULES, encoding="utf-8") as f:
-        rules = json.load(f)
+    rules = STORE.rules("cargo_classes")
     ports = load_ports()
     n_overrides = apply_overrides(ports) if overrides else 0
     rows = []

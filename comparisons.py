@@ -23,7 +23,7 @@ the lens, so the screen draws any lens the same way:
      "flags": [{"level", "code", "name", "text"}],
      "alt": {"mode", "days", "closure"} or None, the other way there, when a lens shows only the soonest
      "closure": float or None,                   when the last ton arrives, with the lift on hand (lift.py)
-     "lift": {...}, "limit": text or None}       what carries it, and what sets the closure
+     "lift": {...}, "limit": {...} or None}      what carries it, and what sets the closure (fields, see lift.py)
 
 "days" is the first arrival. A column is one way of moving all the cargo, so
 classes in it share ships, aircraft, ports and airfields (see lift.py).
@@ -37,6 +37,7 @@ import copy
 import math
 
 from cargo_movement import FLAG_NAMES
+from falcon_data import STORE
 from lift import Lift
 from sea_routing import great_circle_nm
 
@@ -113,7 +114,8 @@ def _close(P, s, rows, legs):
     """Closure for every cell: everything by sea, and everything by air, each pooled."""
     closed = _closed(P, s)
     LIFT.close(P, {"sea": [(i["class"], i.get("short_tons"), sea) for i, sea, _ in rows],
-                   "air": [(i["class"], i.get("short_tons"), air) for i, _, air in rows]}, legs, s.get("lift"), closed)
+                   "air": [(i["class"], i.get("short_tons"), air) for i, _, air in rows]}, legs, s.get("lift"), closed,
+               s.get("port_rates"))
 
 
 def by_mode(P, s):
@@ -132,16 +134,26 @@ def by_plan(P, s):
     "fallback" (why it went the other way, when the mode asked for can't be used) and
     "switch" (the other mode, when it's available).
 
-    "levers" are the same plan re-run with one change each, so the screen can show
-    what would move the answer without choosing: "switch" moves one class to its
-    other mode; "more" adds one of a lift type at the origin, ready on D+0. Each gives
-    "last" (the day the last ton of the whole plan is in, None if some class can't
-    get there with the lift on hand) and, for a switch, what the class then uses."""
+    Besides the grid it returns:
+      "last"     the day the last ton of the whole plan is in (None if some class
+                 can't get there with the lift on hand);
+      "changes"  the same plan re-run with one change each, every one tested, so
+                 the screen shows what would move the answer without choosing:
+                 {"id", "kind": "mode", "class", "to", "lift", "last"}       a class on its other mode
+                 {"id", "kind": "lift", "type", "name", "add": 1, "last"}    one more of a lift type, at the origin
+                 {"id", "kind": "port_rate", "port_id", "place", "work",     a port at the next harbor size's rate
+                  "from", "to", "size", "last"}
+                 sorted soonest first;
+      "usage"    each port's work and each pool of ships or aircraft (lift.py);
+      "figures"  the figures the answer rests on, each with its value, unit and
+                 source (falcon_data.py)."""
     rows, legs = _ways(P, s, s["goal"])
     closed = _closed(P, s)
     modes = dict(LIFT.normal_mode, **(s.get("modes") or {}))
+    rates = dict(s.get("port_rates") or {})
+    used = {}
 
-    def run(modes, lift):
+    def run(modes, lift, rates=rates):
         picked = []
         for item, sea, air in rows:
             want = modes.get(item["class"], "sea")
@@ -154,7 +166,7 @@ def by_plan(P, s):
             c = dict(copy.deepcopy(c), chosen=want, fallback=fallback,
                      switch=other["mode"] if other["available"] else None)
             picked.append((item["class"], item.get("short_tons"), c))
-        LIFT.close(P, {"plan": picked}, legs, lift, closed)
+        used.update(LIFT.close(P, {"plan": picked}, legs, lift, closed, rates))
         return picked
 
     def last(picked):
@@ -162,20 +174,33 @@ def by_plan(P, s):
         return None if any(d is None for d in days) else max(days, default=0.0)
 
     plan = run(modes, s.get("lift"))
-    switch, more = {}, {}
+    usage, figure_ids = used["plan"]["usage"], used["plan"]["figures"]
+    changes = []
     for cid, _, c in plan:
         if c["switch"]:
             flipped = run(dict(modes, **{cid: "sea" if c["mode"] != "sea" else "air"}), s.get("lift"))
             alt = next(x for x in flipped if x[0] == cid)[2]
-            switch[cid] = {"to": alt["mode"], "last": last(flipped), "lift": alt["lift"]}
+            changes.append({"id": "mode:" + cid, "kind": "mode", "class": cid, "to": alt["mode"], "lift": alt["lift"],
+                            "last": last(flipped)})
     for t in sorted({c["lift"]["type"] for _, _, c in plan if c.get("lift")}):
         groups = LIFT.groups(s.get("lift"))
         groups[t] = groups[t] + [{"count": 1, "at": None, "ready": 0.0}]
-        more[t] = {"last": last(run(modes, groups))}
+        name = (LIFT.ships.get(t) or LIFT.aircraft[t])["name"]
+        changes.append({"id": "lift:" + t, "kind": "lift", "type": t, "name": name, "add": 1,
+                        "last": last(run(modes, groups))})
+    for u in usage:
+        up = LIFT.next_rate(u["rate_st_per_day"]) if u["kind"] == "port" else None
+        if up and not any(x.get("port_id") == u["port_id"] for x in changes):
+            changes.append({"id": "port_rate:" + u["port_id"], "kind": "port_rate", "port_id": u["port_id"],
+                            "place": u["place"], "work": u["work"], "from": u["rate_st_per_day"], "to": up[1],
+                            "size": up[0], "last": last(run(modes, s.get("lift"), dict(rates, **{u["port_id"]: up[1]})))})
+    changes.sort(key=lambda x: (x["last"] is None, x["last"] or 0, x["id"]))
+    figures = STORE.figures()
     by_class = {cid: c for cid, _, c in plan}
     return {"columns": [{"id": "plan", "label": "Plan", "sub": "each class on its normal mode"}],
             "rows": [_row(P, item, {"plan": by_class[item["class"]]}) for item, _, _ in rows], "legs": legs,
-            "modes": modes, "levers": {"last": last(plan), "switch": switch, "more": more}}
+            "modes": modes, "port_rates": rates, "last": last(plan), "changes": changes, "usage": usage,
+            "figures": [figures[f] for f in figure_ids if f in figures]}
 
 
 def alternate_ports(P, s, radius_nm=POD_RADIUS_NM, n=POD_ALTERNATES):
@@ -222,13 +247,13 @@ def by_port(P, s):
 
 
 LENSES = {
-    "plan": {"label": "Plan", "run": by_plan,
-             "note": "Each class on its normal mode, all sharing ships, aircraft, ports and airfields. The levers re-run "
-                     "the plan with one change each; none is chosen for you."},
-    "mode": {"label": "Mode", "run": by_mode,
+    "plan": {"label": "Plan", "short": "Plan", "run": by_plan,
+             "note": "Each class on its normal mode, all sharing ships, aircraft, ports and airfields. Every single "
+                     "change is tested and listed; none is chosen for you."},
+    "mode": {"label": "Mode", "short": "Sea vs air", "run": by_mode,
              "note": "By sea against by air. By air flies the whole way, or flies part way and goes on by sea "
                      "when no flight reaches the far end."},
-    "pod": {"label": "Port of debarkation", "run": by_port,
+    "pod": {"label": "Port of debarkation", "short": "Nearby ports", "run": by_port,
             "note": "The destination against the nearest %d Medium or Large harbors within %d nm. Each cell is the "
                     "way that closes soonest at that port." % (POD_ALTERNATES, POD_RADIUS_NM)},
 }

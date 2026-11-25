@@ -17,10 +17,11 @@ Python 3, stdlib only. All routing lives in sea_routing.py.
                               areas of denial close the water to everyone, a WEZ to
                               commercial carriers only; see cargo_movement.py
     POST /api/compare         {"from", "to", "cargo", "areas", "wez", "lens": "plan" | "mode" | "pod", "lift": {type: count}, "modes": {class: "sea" | "air"},
-                               "base": {"areas": [...], "wez": [...], "lift": {...}}}   the planner screen's grid,
+                               "port_rates": {port_id: short tons a day},
+                               "base": {"areas": [...], "wez": [...], "lift": {...}, "modes": {...}, "port_rates": {...}}}
+                              the planner screen's grid,
                               for this situation and the baseline's; see comparisons.py
 """
-import csv
 import glob
 import json
 import math
@@ -33,6 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import comparisons
 from cargo_movement import CargoPlanner
+from falcon_data import STORE
 from sea_routing import DenialArea, SeaGraph
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -44,12 +46,12 @@ MAX_RADIUS_NM = 3000
 MAX_BODY_BYTES = 1_000_000
 NOMINAL_KNOTS = 18          # only to turn extra distance into rough days
 
+STORE.check()               # refuse to start on data files that are missing a figure or a source, or disagree
 print("loading sea network ...")
 GRAPH = SeaGraph.load()
 GRAPH.links_in_areas([])    # build the area index now, not on the first request
 LOCK = threading.Lock()     # the graph's lazy caches aren't built for concurrent first use
-with open(os.path.join(HERE, "neo4j-datamodel", "nodes", "passages.csv"), encoding="utf-8") as f:
-    PASSAGE_NAMES = {r["passage_id"]: r["name"] for r in csv.DictReader(f)}
+PASSAGE_NAMES = STORE.passages()
 PLANNER = CargoPlanner(GRAPH)
 PORT_LIST = sorted(({"id": pid, "name": p["name"], "country": p["country"] or "",
                      "lat": float(p["lat"]), "lon": float(p["lon"]), "size": p["harbor_size"] or "",
@@ -254,15 +256,24 @@ def find_compare(body):
             raise BadRequest('modes must be {class: "sea" | "air"}.')
         return modes
 
+    def parse_port_rates(rates):
+        if rates is not None and not (isinstance(rates, dict) and len(rates) <= 50 and all(
+                k in GRAPH.ports and isinstance(v, (int, float)) and not isinstance(v, bool) and 1 <= v <= 100000
+                for k, v in rates.items())):
+            raise BadRequest("port_rates must be {port_id: short tons a day}, 1 to 100,000.")
+        return rates
+
     lift, modes = parse_lift(body.get("lift")), parse_modes(body.get("modes"))
+    rates = parse_port_rates(body.get("port_rates"))
     base = body.get("base")
     if base is not None and not isinstance(base, dict):
         raise BadRequest("base must be {\"areas\": [...], \"wez\": [...], \"lift\": {...}}.")
 
-    def run(raw_areas, raw_wez, lift, modes):
-        key = json.dumps([lens, origin, goal, cargo, countries, lift, modes, raw_areas or [], raw_wez or []], sort_keys=True)
+    def run(raw_areas, raw_wez, lift, modes, rates):
+        key = json.dumps([lens, origin, goal, cargo, countries, lift, modes, rates, raw_areas or [], raw_wez or []],
+                         sort_keys=True)
         s = {"origin": origin, "goal": goal, "cargo": cargo, "countries": countries, "lift": lift, "modes": modes,
-             "denial": parse_areas(raw_areas), "wez": parse_areas(raw_wez)}
+             "port_rates": rates, "denial": parse_areas(raw_areas), "wez": parse_areas(raw_wez)}
         with LOCK:
             if key not in COMPARED:
                 if len(COMPARED) >= MAX_COMPARED:
@@ -271,8 +282,9 @@ def find_compare(body):
             return COMPARED[key]
 
     started = time.perf_counter()
-    out = dict(run(body.get("areas"), body.get("wez"), lift, modes))
-    out["base"] = (run(base.get("areas"), base.get("wez"), parse_lift(base.get("lift")), parse_modes(base.get("modes")))
+    out = dict(run(body.get("areas"), body.get("wez"), lift, modes, rates))
+    out["base"] = (run(base.get("areas"), base.get("wez"), parse_lift(base.get("lift")), parse_modes(base.get("modes")),
+                       parse_port_rates(base.get("port_rates")))
                    if base is not None else None)
     out["ms"] = round((time.perf_counter() - started) * 1000)
     return out
@@ -316,7 +328,7 @@ CARGO_META = {
     "knots": {k: v["knots"] for k, v in PLANNER.rules["carriers"].items() if not k.startswith("_")},
     "handling": {k: v for k, v in PLANNER.air_rules["handling"].items() if not k.startswith("_")},
     "lift": comparisons.LIFT.summary(),
-    "lenses": [{"id": k, "label": v["label"], "note": v["note"]} for k, v in comparisons.LENSES.items()],
+    "lenses": [{"id": k, "label": v["label"], "short": v["short"], "note": v["note"]} for k, v in comparisons.LENSES.items()],
     "scenarios": cargo_scenarios(),
 }
 

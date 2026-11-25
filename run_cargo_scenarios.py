@@ -40,6 +40,7 @@ import map_snapshot
 import run_scenarios as routes
 import server
 from run_scenarios import ScenarioError, check, in_range, range_text
+from falcon_data import STORE
 from sea_routing import densify, great_circle_nm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -60,8 +61,7 @@ def plan_text(plan):
 
 
 LEVELS, FLAG_NAMES = cargo_movement.LEVELS, cargo_movement.FLAG_NAMES
-INPUTS = (cargo_capability.PORTS, cargo_capability.RULES, cargo_capability.OVERRIDES, cargo_movement.RULES,
-          cargo_movement.AIR_RULES, air_routing.AIRFIELDS)
+INPUTS = STORE.input_files()
 AIR = PLANNER.air
 
 

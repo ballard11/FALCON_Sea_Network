@@ -17,8 +17,12 @@ same seed makes the same cases.
 2. Closure (lift.py): the last ton never arrives before the first; more lift is
    never slower; a slower port is never faster; more cargo is never sooner; lift
    that starts later or further away is never sooner.
-3. Plan (comparisons.py): the last ton of the plan is the latest class; each
-   lever says what applying it gives.
+3. Plan (comparisons.py): the last ton of the plan is the latest class; every
+   single change is listed, and each says what applying it gives; capacity
+   used agrees with the limit; every figure shown has a source.
+4. Data (falcon_data.py): the files pass their own check, and a file broken
+   on purpose (a figure without a source, a bad status, classes that disagree)
+   is caught.
 
 Exits 1 if any check fails, listing up to three examples of each.
 """
@@ -27,13 +31,17 @@ import collections
 import contextlib
 import io
 import json
+import os
 import random
+import shutil
 import sys
+import tempfile
 import time
 
 with contextlib.redirect_stdout(io.StringIO()):          # the runner prints while it loads the network
     import run_cargo_scenarios as R
 import comparisons
+import falcon_data
 import server
 
 P, G, L = R.PLANNER, R.GRAPH, comparisons.LIFT
@@ -65,9 +73,9 @@ def area_near(rng, o, d):
             "radius_nm": rng.choice([60, 120, 250, 400, 600])}
 
 
-def scenario(o, d, cargo, raw_den=(), raw_wez=(), lift=None, modes=None):
+def scenario(o, d, cargo, raw_den=(), raw_wez=(), lift=None, modes=None, port_rates=None):
     return {"origin": o, "goal": d, "cargo": cargo, "countries": None, "lift": lift, "modes": modes,
-            "denial": server.parse_areas(list(raw_den)), "wez": server.parse_areas(list(raw_wez))}
+            "port_rates": port_rates, "denial": server.parse_areas(list(raw_den)), "wez": server.parse_areas(list(raw_wez))}
 
 
 def cells(result):
@@ -159,15 +167,85 @@ def plan(C, rng, moves, pool):
         raw_wez = [area_near(rng, o, d)] if rng.random() < 0.4 else []
         tag = "%s -> %s" % (G.ports[o]["name"], G.ports[d]["name"])
         out = comparisons.compare(P, "plan", scenario(o, d, cargo, (), raw_wez))
-        days = [r["cells"]["plan"]["closure"] for r in out["rows"]]
+        cells_ = {r["class"]: r["cells"]["plan"] for r in out["rows"]}
+        days = [c["closure"] for c in cells_.values()]
         last = None if any(x is None for x in days) else max(days)
-        C.check("plan", "the plan's last ton is its latest class", out["levers"]["last"] == last,
-                "%s: %s against %s" % (tag, out["levers"]["last"], last))
-        for cid, lever in out["levers"]["switch"].items():
-            modes = dict(out["modes"], **{cid: "sea" if lever["to"] == "sea" else "air"})
-            tried = comparisons.compare(P, "plan", scenario(o, d, cargo, (), raw_wez, modes=modes))
-            C.check("plan", "a lever says what applying it gives", tried["levers"]["last"] == lever["last"],
-                    "%s, Class %s to %s: lever %s, applied %s" % (tag, cid, lever["to"], lever["last"], tried["levers"]["last"]))
+        C.check("plan", "the plan's last ton is its latest class", out["last"] == last,
+                "%s: %s against %s" % (tag, out["last"], last))
+        ids = {x["id"] for x in out["changes"]}
+        want = {"mode:" + c for c, cell in cells_.items() if cell.get("switch")}
+        want |= {"lift:" + cell["lift"]["type"] for cell in cells_.values() if cell.get("lift")}
+        C.check("plan", "every single change is listed", want <= ids, "%s: missing %s" % (tag, sorted(want - ids)))
+        lasts = [(x["last"] is None, x["last"] or 0) for x in out["changes"]]
+        C.check("plan", "changes are listed soonest first", lasts == sorted(lasts), tag)
+        for x in out["changes"]:
+            if x["kind"] == "mode":
+                applied = scenario(o, d, cargo, (), raw_wez, modes=dict(out["modes"], **{x["class"]: "sea" if x["to"] == "sea" else "air"}))
+            elif x["kind"] == "lift":
+                groups = L.groups()
+                groups[x["type"]] = groups[x["type"]] + [{"count": 1, "at": None, "ready": 0.0}]
+                applied = scenario(o, d, cargo, (), raw_wez, lift=groups)
+            else:
+                applied = scenario(o, d, cargo, (), raw_wez, port_rates={x["port_id"]: x["to"]})
+                C.check("plan", "a port rate change is to a faster rate", x["to"] > x["from"], "%s: %s" % (tag, x))
+            tried = comparisons.compare(P, "plan", applied)
+            C.check("plan", "a change says what applying it gives", tried["last"] == x["last"],
+                    "%s, %s: listed %s, applied %s" % (tag, x["id"], x["last"], tried["last"]))
+        ports_used = {(u["port_id"], u["work"]): u for u in out["usage"] if u["kind"] == "port"}
+        for u in ports_used.values():
+            C.check("plan", "a port's days of work are its tons over its rate",
+                    abs(u["days"] - u["demand_st"] / u["rate_st_per_day"]) <= 0.05 + 1e-9, "%s: %s" % (tag, u))
+        for cid, c in cells_.items():
+            lim = c.get("limit")
+            if lim and lim["kind"] == "port":
+                u = ports_used.get((lim["port_id"], lim["work"]))
+                C.check("plan", "a port limit is in the capacity used, at the same rate and tons",
+                        u is not None and u["rate_st_per_day"] == lim["rate_st_per_day"] and u["demand_st"] == lim["demand_st"],
+                        "%s class %s: %s against %s" % (tag, cid, lim, u))
+            C.check("plan", "a limit is fields, not words", lim is None or isinstance(lim, dict) and "kind" in lim,
+                    "%s class %s: %r" % (tag, cid, lim))
+        for f in out["figures"]:
+            C.check("plan", "every figure shown has a source",
+                    f["source"] is not None and f["source"]["status"] in falcon_data.STATUSES, "%s: %s" % (tag, f["id"]))
+        rates = {u["figure"] for u in ports_used.values() if u["figure"]}
+        C.check("plan", "every port rate used is among the figures shown", rates <= {f["id"] for f in out["figures"]},
+                "%s: %s" % (tag, sorted(rates - {f["id"] for f in out["figures"]})))
+
+
+def data(C, rng, moves, pool):
+    """The data files pass their own check, and files broken on purpose don't."""
+    C.check("data", "the data files have no problems", not falcon_data.STORE.problems(),
+            "; ".join(falcon_data.STORE.problems()[:3]))
+    breaks = [
+        ("a figure without a source", "lift_rules.json", lambda r: r["ships"]["tanker"]["_sources"].pop("capacity_st")),
+        ("a status that isn't one of the three", "lift_rules.json",
+         lambda r: r["ships"]["tanker"]["_sources"]["count"].update(status="probably")),
+        ("sourced without a url", "air_rules.json",
+         lambda r: r["aircraft"]["commercial"]["_sources"]["payload_st"].pop("url")),
+        ("a class with no normal mode", "lift_rules.json", lambda r: r["plan"]["normal_mode"].pop("IV")),
+        ("a class that never flies, set to go by air", "lift_rules.json",
+         lambda r: r["plan"]["normal_mode"].update(III="air")),
+        ("a class carried by two ship types", "lift_rules.json", lambda r: r["ships"]["tanker"]["classes"].append("I")),
+        ("a harbor size with no port rate", "lift_rules.json", lambda r: r["ports"]["rate_st_per_day"].pop("Medium")),
+        ("a source for a field that isn't there", "lift_rules.json",
+         lambda r: r["ports"]["_sources"].update(rate_per_hour={"status": "illustrative", "source": "x"})),
+        ("a rate of zero", "lift_rules.json", lambda r: r["ports"]["rate_st_per_day"].update(Large=0)),
+    ]
+    src = falcon_data.STORE
+    for name, fname, breaker in breaks:
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "cargo"))
+            for f in os.listdir(src.rules_dir):
+                if f.endswith((".json", ".csv")) and f != "port_cargo_capability.csv":
+                    shutil.copy(os.path.join(src.rules_dir, f), os.path.join(tmp, "cargo", f))
+            with open(os.path.join(tmp, "cargo", fname), encoding="utf-8") as f:
+                rules = json.load(f)
+            breaker(rules)
+            with open(os.path.join(tmp, "cargo", fname), "w", encoding="utf-8") as f:
+                json.dump(rules, f)
+            st = falcon_data.Store(tmp)
+            st.ref_dir = src.ref_dir                     # the reference data isn't copied: it isn't broken
+            C.check("data", "a file broken on purpose is caught", bool(st.problems()), name)
 
 
 def main():
@@ -183,7 +261,8 @@ def main():
     region_big = [p for p in region if G.ports[p]["harbor_size"] in ("Large", "Medium")]
     C = Checks()
     started = time.perf_counter()
-    for name, part, pool in (("planner", planner, region), ("closure", closure, region_big), ("plan", plan, region_big)):
+    for name, part, pool in (("planner", planner, region), ("closure", closure, region_big), ("plan", plan, region_big),
+                             ("data", data, None)):
         t = time.perf_counter()
         part(C, rng, a.moves, pool)
         print("  %-8s %5d checks, %d failed  (%.0f s)" % (name, C.ran[name], sum(v for (p, _), v in C.failed.items() if p == name),

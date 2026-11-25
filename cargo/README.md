@@ -17,6 +17,13 @@ summary. It takes about a second and needs only the Python standard library.
 | `port_overrides.csv` | Sourced corrections for key ports. These win over the World Port Index | Yes, to add a port or fact |
 | `port_cargo_capability.csv` | The ratings | No, it is regenerated |
 | `movement_rules.json` | Carriers, the handover rule, handover countries and the default cargo, for `cargo_movement.py` | Yes, to change how cargo moves |
+| `air_rules.json` | Aircraft, which classes fly, handling allowances, airfield rules | Yes |
+| `lift_rules.json` | Ships and aircraft on hand, load sizes, port rates by harbor size, working MOG, each class's normal mode, for `lift.py` | Yes |
+| `port_rates.csv` | A sourced rate for one port (`port_id,name,rate_st_per_day,status,source,url,checked`). Wins over the harbor-size rate | Yes, to add a port's rate |
+
+Every figure in these files has a source under `"_sources"`; `python falcon_data.py`
+checks them all, and that the files agree with each other (see the main README,
+"How the data is organised").
 
 ## How a port is rated
 

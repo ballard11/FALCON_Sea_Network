@@ -38,20 +38,14 @@ bottlenecks and data checks it runs into; see cargo_scenarios/README.md.
 Classes that travel the same legs are also gathered into routes, so a plan
 reads as a few routes, each carrying several classes.
 """
-import csv
-import json
 import math
-import os
 import re
 
 import cargo_capability
 from air_routing import AirNetwork
+from falcon_data import STORE
 from sea_routing import _unwrap, densify, great_circle_nm
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-RULES = os.path.join(HERE, "cargo", "movement_rules.json")
-AIR_RULES = os.path.join(HERE, "cargo", "air_rules.json")
-PASSAGES = os.path.join(HERE, "neo4j-datamodel", "nodes", "passages.csv")
 SAMPLE_NM = 2.0              # legs are measured inside a WEZ every 2 nm
 LEVELS = ("bottleneck", "risk", "check", "note")
 FLAG_NAMES = {
@@ -101,15 +95,12 @@ def nm_inside(line, areas):
 class CargoPlanner:
     def __init__(self, graph, overrides=True):
         self.g = graph
-        with open(RULES, encoding="utf-8") as f:
-            self.rules = json.load(f)
+        self.rules = STORE.rules("movement")
         self.class_rules, _, rows, self.n_overrides = cargo_capability.rate_all(overrides)
         self.classes = self.class_rules["classes"]
         self.rating = {(r["port_id"], r["class_id"]): r for r in rows}
-        with open(PASSAGES, encoding="utf-8") as f:
-            self.passage_names = {r["passage_id"]: r["name"] for r in csv.DictReader(f)}
-        with open(AIR_RULES, encoding="utf-8") as f:
-            self.air_rules = json.load(f)
+        self.passage_names = STORE.passages()
+        self.air_rules = STORE.rules("air")
         self.air = AirNetwork.load()
 
     def default_cargo(self):

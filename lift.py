@@ -5,12 +5,13 @@ Python 3, stdlib only.
 
     from lift import Lift
     lift = Lift.load()
-    lift.close(planner, columns_of_cells, legs, lift_on_hand, closed)
+    used = lift.close(planner, columns_of_cells, legs, lift_on_hand, closed, port_rates)
 
 Lift on hand is {type: count} or {type: [{"count", "at", "ready"}]}: groups of
 one type, each starting at a port (ships) or an airfield (aircraft), or at the
 origin when "at" is None, and free to move from day "ready". A plain count is
-one group at the origin, ready on D+0.
+one group at the origin, ready on D+0. port_rates is a what-if's {port_id:
+short tons a day}, which wins over the data.
 
 A cell's "days" stays the first arrival as if lift were waiting at the origin:
 the first load, with the planner's handling allowances. Closure adds the
@@ -27,23 +28,34 @@ longest of the waits that more cargo, and lift that isn't there yet, bring:
 
 Classes that use the same ship type (or aircraft) on the same legs share it:
 their tons are pooled. A port or airfield works all the cargo through it, so
-its rate is shared too. Each cell gets "closure", "lift" (what carries it) and
-"limit" (what sets the closure). Figures come from cargo/lift_rules.json; every
-one there is marked sourced or illustrative.
+its rate is shared too.
+
+Results are data, never sentences; the screen words them. Each cell gets
+"closure", "lift" (what carries it) and "limit" (what sets the closure, or
+None when nothing makes it wait):
+
+    {"kind": "port", "place", "port_id", "work": "loading" | "discharging", "demand_st", "rate_st_per_day"}
+    {"kind": "ships", "type", "name", "count", "loads"}            too few ships for the loads
+    {"kind": "ships_arriving", "type", "name", "at", "from": [places]}
+    {"kind": "no_ships", "type", "name", "at"}                     none can reach the loading port
+    {"kind": "aircraft", "type", "name", "count", "sorties_per_day", "from": [places]}
+    {"kind": "mog", "place", "type", "name", "sorties_per_day"}    an airfield's working MOG
+    {"kind": "aircraft_arriving", "type", "name", "at", "from": [places]}
+    {"kind": "no_aircraft", "type", "name"}
+
+close() returns, for each column, what it used: "usage" (each port's work and
+each pool of ships or aircraft, with the days it takes) and "figures" (the ids
+of the figures in falcon_data.FIGURES that the answer rests on).
 
 Simplifications: sailing time is the route's; a ship sails to the loading port
 by the shortest sea route its carrier may use; an aircraft flies there direct,
 on a great circle; the sea part of air-then-sea isn't limited by ships.
 """
 import heapq
-import json
 import math
-import os
 
+from falcon_data import STORE
 from sea_routing import great_circle_nm
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-RULES = os.path.join(HERE, "cargo", "lift_rules.json")
 
 
 def _public(d):
@@ -51,20 +63,20 @@ def _public(d):
 
 
 class Lift:
-    def __init__(self, rules):
+    def __init__(self, rules, port_rates=None):
         self.rules = rules
         self.ships = _public(rules["ships"])
         self.aircraft = _public(rules["aircraft"])
         self.ship_for = {c: t for t, s in self.ships.items() for c in s["classes"]}
         self.port_rate = rules["ports"]["rate_st_per_day"]
+        self.rate_by_port = {pid: r["rate_st_per_day"] for pid, r in (port_rates or {}).items()}
         self.normal_mode = _public(rules["plan"]["normal_mode"])
         self.fuel_lb_per_gal = rules["plan"]["fuel_lb_per_gal"]
         self.mog = rules["airfields"]["working_mog"]
 
     @classmethod
-    def load(cls, path=RULES):
-        with open(path, encoding="utf-8") as f:
-            return cls(json.load(f))
+    def load(cls, store=STORE):
+        return cls(store.rules("lift"), store.port_rates())
 
     def counts(self, override=None):
         """How many of each type are on hand: the starting set, with any override."""
@@ -80,32 +92,51 @@ class Lift:
                           [{"count": g["count"], "at": g.get("at"), "ready": float(g.get("ready") or 0)} for g in v])
         return out
 
+    def rate(self, port, pid, whatif=None):
+        """A port's short tons a day and where that figure comes from: (rate, figure id),
+        the figure id None for a what-if's rate."""
+        if whatif and pid in whatif:
+            return whatif[pid], None
+        if pid in self.rate_by_port:
+            return self.rate_by_port[pid], "port_rates:" + pid
+        size = port["harbor_size"] or ""
+        return self.port_rate[size], "lift:ports.rate_st_per_day." + size
+
+    def next_rate(self, rate):
+        """The next harbor size's rate above this one: (size, rate), or None at the top."""
+        up = sorted((r, s) for s, r in self.port_rate.items() if r > rate)
+        return (up[0][1], up[0][0]) if up else None
+
     def summary(self):
-        return {"ships": {t: {k: s[k] for k in ("name", "classes", "capacity_st", "count", "carrier")}
+        return {"ships": {t: {k: s[k] for k in ("name", "short", "classes", "capacity_st", "count", "carrier")}
                           for t, s in self.ships.items()},
-                "aircraft": {t: {k: a[k] for k in ("name", "planning_payload_st", "ground_hours", "count")}
+                "aircraft": {t: {k: a[k] for k in ("name", "short", "planning_payload_st", "ground_hours", "count")}
                              for t, a in self.aircraft.items()},
                 "port_rate_st_per_day": self.port_rate, "working_mog": self.mog,
                 "normal_mode": self.normal_mode, "fuel_lb_per_gal": self.fuel_lb_per_gal}
 
     # ------------------------------------------------------------------ close
-    def close(self, P, columns, legs, lift=None, closed=None):
+    def close(self, P, columns, legs, lift=None, closed=None, port_rates=None):
         """columns: {column_id: [(class_id, short_tons, cell)]}, one entry per class
         in that column, each cell as comparisons.py makes them. closed is the sea
         links each carrier may not use ({"commercial", "military"}). Adds closure
         to every available cell, pooling within a column (one column is one way
-        of moving all the cargo)."""
+        of moving all the cargo). Returns {column_id: {"usage", "figures"}}."""
         groups = self.groups(lift)
         closed = closed or {"commercial": frozenset(), "military": frozenset()}
         arrivals = {}            # (type, loading point) -> [(day it can start there, origin name)], one per unit
-        for entries in columns.values():
+        used = {}
+        for col, entries in columns.items():
+            u = used[col] = {"usage": [], "figures": set()}
             self._close_sea(P, [e for e in entries if e[2]["available"] and e[2]["mode"] == "sea"], legs, groups,
-                            closed, arrivals)
+                            closed, arrivals, port_rates, u)
             self._close_air(P, [e for e in entries if e[2]["available"] and e[2]["mode"] != "sea"], legs, groups,
-                            arrivals)
+                            arrivals, u)
             for _, _, c in entries:
                 if not c["available"]:
                     c.update(closure=None, lift=None, limit=None)
+            u["figures"] = sorted(u["figures"])
+        return used
 
     def _ships_at(self, P, stype, port, groups, closed, arrivals):
         """Each ship of the type: (the day it can start loading at port, where it came from)."""
@@ -125,7 +156,7 @@ class Lift:
             arrivals[key] = sorted(out)
         return arrivals[key]
 
-    def _close_sea(self, P, entries, legs, groups, closed, arrivals):
+    def _close_sea(self, P, entries, legs, groups, closed, arrivals, whatif, u):
         hd = P.air_rules["handling"]["ship_port_days"]
         ports = P.g.ports
         at_origin, at_goal, pools = {}, {}, {}
@@ -135,6 +166,17 @@ class Lift:
             at_origin[o] = at_origin.get(o, 0) + (tons or 0)
             at_goal[d] = at_goal.get(d, 0) + (tons or 0)
             pools.setdefault((self.ship_for[cid], tuple(c["legs"])), []).append((cid, tons, c, sea, o, d))
+        if entries:
+            u["figures"].add("air:handling.ship_port_days")
+        rates = {}
+        for work, totals in (("loading", at_origin), ("discharging", at_goal)):
+            for p, total in totals.items():
+                rate, fid = rates[p] = self.rate(ports[p], p, whatif)
+                if fid:
+                    u["figures"].add(fid)
+                u["usage"].append({"kind": "port", "port_id": p, "place": ports[p]["name"], "work": work,
+                                   "demand_st": total, "rate_st_per_day": rate, "figure": fid,
+                                   "days": round(total / rate, 1)})
         for (stype, _), members in pools.items():
             ship = self.ships[stype]
             tons = sum(m[1] or 0 for m in members)
@@ -144,11 +186,18 @@ class Lift:
             loads = math.ceil(tons / ship["capacity_st"]) if tons else 0
             lift = {"kind": "ship", "type": stype, "name": ship["name"], "count": count, "loads": loads,
                     "capacity_st": ship["capacity_st"], "pool_st": tons}
+            u["figures"].update({"lift:ships.%s.capacity_st" % stype, "lift:ships.%s.count" % stype,
+                                 "movement:carriers.%s.knots" % ship["carrier"]})
+            row = {"kind": "ships", "type": stype, "name": ship["name"], "classes": [m[0] for m in members],
+                   "count": count, "loads": loads, "capacity_st": ship["capacity_st"], "pool_st": tons,
+                   "fill": round(tons / (loads * ship["capacity_st"]), 2) if loads else 0.0, "days": None}
+            u["usage"].append(row)
             if loads and not count:
                 for m in members:
-                    m[2].update(closure=None, lift=lift, limit="No %s can reach %s" % (ship["name"].lower(), ports[o]["name"]))
+                    m[2].update(closure=None, lift=lift,
+                                limit={"kind": "no_ships", "type": stype, "name": ship["name"], "at": ports[o]["name"]})
                 continue
-            r_o, r_d = self.port_rate[ports[o]["harbor_size"] or ""], self.port_rate[ports[d]["harbor_size"] or ""]
+            r_o, r_d = rates[o][0], rates[d][0]
             sail = sum(x["days"] for x in sea)
             # A ship's round trip: load and work a full load at each end (at least the day allowed in each
             # port), sail there and back, and a day at each handover port on the way.
@@ -162,6 +211,7 @@ class Lift:
                 t = heapq.heappop(free)
                 last = max(last, t)
                 heapq.heappush(free, t + cycle)
+            row["days"] = round(last, 1)
             first_in = fleet[0][0] if fleet else 0.0
             # The first arrival already allows a day in each port. A port works all the cargo through it,
             # every class, from D+0; this pool's own cargo can't start before its first ship is there.
@@ -174,16 +224,14 @@ class Lift:
             limit = None
             if waits[key] > 0:
                 if (key == "ships" and loads <= count) or late_ships:
-                    far = [came for t, came in fleet[:loads] if came]
-                    limit = "%ss reaching %s%s" % (ship["name"], ports[o]["name"],
-                                                   " (from %s)" % ", ".join(sorted(set(far))) if far else "")
+                    limit = {"kind": "ships_arriving", "type": stype, "name": ship["name"], "at": ports[o]["name"],
+                             "from": sorted({came for t, came in fleet[:loads] if came})}
                 elif key == "ships":
-                    limit = "%d %s%s for %d loads" % (count, ship["name"], "" if count == 1 else "s", loads)
+                    limit = {"kind": "ships", "type": stype, "name": ship["name"], "count": count, "loads": loads}
                 else:
-                    p, rate, verb = (o, r_o, "loading") if key == "origin" else (d, r_d, "discharging")
-                    limit = "%s %s %s short tons at %s a day" % (ports[p]["name"], verb,
-                                                                 format(round((at_origin if key == "origin" else at_goal)[p]), ","),
-                                                                 format(rate, ","))
+                    p, rate, work_ = (o, r_o, "loading") if key == "origin" else (d, r_d, "discharging")
+                    limit = {"kind": "port", "port_id": p, "place": ports[p]["name"], "work": work_,
+                             "demand_st": (at_origin if key == "origin" else at_goal)[p], "rate_st_per_day": rate}
             for _, _, c, *_ in members:
                 c.update(closure=round(c["days"] + waits[key], 1), lift=lift, limit=limit)
 
@@ -201,30 +249,39 @@ class Lift:
             arrivals[key] = sorted(out)
         return arrivals[key]
 
-    def _close_air(self, P, entries, legs, groups, arrivals):
+    def _close_air(self, P, entries, legs, groups, arrivals, u):
         air = P.air
         pools = {}
         for cid, tons, c in entries:
             for carrier in {legs[k]["carrier"] for k in c["legs"] if legs[k]["mode"] == "air"}:
                 flights = [legs[k] for k in c["legs"] if legs[k]["mode"] == "air" and legs[k]["carrier"] == carrier]
-                pools.setdefault((carrier, tuple(c["legs"])), []).append((tons, c, flights))
+                pools.setdefault((carrier, tuple(c["legs"])), []).append((cid, tons, c, flights))
+        if entries:
+            u["figures"].add("air:handling.airfield_hours")
         waits = {}               # cell id -> (days, limit, lift, cell) of the slowest carrier in it
         for (carrier, _), members in pools.items():
             plane = self.aircraft[carrier]
-            tons = sum(m[0] or 0 for m in members)
-            flights = members[0][2]
+            tons = sum(m[1] or 0 for m in members)
+            flights = members[0][3]
             sorties = math.ceil(tons / plane["planning_payload_st"]) if tons else 0
             fly_h = sum(x["hours"] for x in flights)
             o, d = flights[0]["from"], flights[-1]["to"]
             fleet = self._planes_at(P, carrier, o, groups, arrivals)
             each = 24 / (2 * fly_h + 2 * plane["ground_hours"])        # sorties a day one aircraft flies
-            mog = {"origin": self.mog.get(air.fields[o]["airport_type"], 1) * 24 / plane["ground_hours"],
-                   "goal": self.mog.get(air.fields[d]["airport_type"], 1) * 24 / plane["ground_hours"]}
+            types = {"origin": air.fields[o]["airport_type"], "goal": air.fields[d]["airport_type"]}
+            mog = {k: self.mog.get(t, 1) * 24 / plane["ground_hours"] for k, t in types.items()}
             cap_key = min(mog, key=mog.get)
+            u["figures"].update({"lift:aircraft.%s.planning_payload_st" % carrier, "lift:aircraft.%s.ground_hours" % carrier,
+                                 "lift:aircraft.%s.count" % carrier, "air:aircraft.%s.cruise_kt" % carrier})
+            u["figures"].update("lift:airfields.working_mog." + t for t in types.values() if t in self.mog)
             lift = {"kind": "aircraft", "type": carrier, "name": plane["name"], "count": len(fleet), "sorties": sorties,
                     "planning_payload_st": plane["planning_payload_st"], "pool_st": tons}
+            row = {"kind": "aircraft", "type": carrier, "name": plane["name"], "classes": [m[0] for m in members],
+                   "count": len(fleet), "sorties": sorties, "pool_st": tons, "sorties_per_day": None, "days": None,
+                   "bound": None}
+            u["usage"].append(row)
             if sorties and not fleet:
-                wait, limit = None, "No %s on hand" % plane["name"]
+                wait, limit = None, {"kind": "no_aircraft", "type": carrier, "name": plane["name"]}
             elif sorties <= 1:
                 wait, limit = (fleet[0][0] if fleet else 0.0), None
             else:
@@ -243,16 +300,21 @@ class Lift:
                     left -= (nxt - t) * rate
                     t = nxt
                 wait = t
-                far = sorted({came for _, came in fleet[:i] if came})
-                name = ("%d %s" % (i, plane["name"]) + (" (from %s)" % ", ".join(far) if far else "")
-                        if bound == "aircraft" else air.name(o if bound == "origin" else d))
-                lift["sorties_per_day"] = round(rate, 1)
-                limit = "%s: %s sorties a day" % (name, format(rate, ".1f")) + ("" if bound == "aircraft" else " (working MOG)")
+                lift["sorties_per_day"] = row["sorties_per_day"] = round(rate, 1)
+                row["days"], row["bound"] = round(wait, 1), bound
                 if fleet[0][0] > 0 and wait == fleet[0][0]:
-                    limit = "%s reaching %s" % (plane["name"], air.name(o))
+                    limit = {"kind": "aircraft_arriving", "type": carrier, "name": plane["name"], "at": air.name(o),
+                             "from": [fleet[0][1]] if fleet[0][1] else []}
+                elif bound == "aircraft":
+                    limit = {"kind": "aircraft", "type": carrier, "name": plane["name"], "count": i,
+                             "sorties_per_day": round(rate, 1), "from": sorted({came for _, came in fleet[:i] if came})}
+                else:
+                    limit = {"kind": "mog", "place": air.name(o if bound == "origin" else d), "type": carrier,
+                             "name": plane["name"], "sorties_per_day": round(rate, 1)}
             if sorties == 1 and fleet and fleet[0][0] > 0:
-                limit = "%s reaching %s%s" % (plane["name"], air.name(o), " (from %s)" % fleet[0][1] if fleet[0][1] else "")
-            for _, c, _ in members:
+                limit = {"kind": "aircraft_arriving", "type": carrier, "name": plane["name"], "at": air.name(o),
+                         "from": [fleet[0][1]] if fleet[0][1] else []}
+            for _, _, c, _ in members:
                 prev = waits.get(id(c))
                 if prev is None or prev[0] is not None and (wait is None or wait > prev[0]):
                     waits[id(c)] = (wait, limit, lift, c)

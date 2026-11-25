@@ -10,6 +10,8 @@ function situation(t) {
   if (!parts.length) parts.push("no areas");
   // Classes moved off their normal mode: "IV by air".
   for (const [c, m] of Object.entries(t.modes || {})) if (meta && m !== meta.lift.normal_mode[c]) parts.push(`${c} by ${m}`);
+  // Port rates a what-if sets: "Subic Bay 4,000 st/d".
+  for (const [p, rate] of Object.entries(t.port_rates || {})) parts.push(`${byId[p] ? byId[p].name : p} ${fmt(rate)} st/d`);
   // Lift that differs from the starting set: "-1 tanker", "+4 C-17".
   for (const [k, x] of liftTypes()) {
     const n = liftCount(t, k);
@@ -44,7 +46,7 @@ function liftUse(k) {
   for (const r of cmp.rows) for (const c of Object.values(r.cells)) {
     if (!c.lift || c.lift.type !== k) continue;
     used = Math.max(used ?? 0, c.lift.kind === "ship" ? c.lift.loads : c.lift.sorties);
-    if (c.limit && (c.limit.startsWith(`${c.lift.count} ${c.lift.name}`) || c.limit.startsWith("No "))) binds = true;
+    if (c.limit && c.limit.type === k && ["ships", "no_ships", "aircraft", "no_aircraft"].includes(c.limit.kind)) binds = true;
   }
   if (used == null) return "Not used in this comparison.";
   const what = k in meta.lift.ships ? `${used} load${used === 1 ? "" : "s"}` : `${fmt(used)} sorties`;
