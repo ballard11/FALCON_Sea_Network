@@ -25,6 +25,7 @@ import glob
 import json
 import math
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -355,6 +356,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, AIRFIELD_LIST)
         if path == "/api/cargo/meta":
             return self.send_json(200, CARGO_META)
+        # The page's own scripts: plain names only, straight from web/js/, so no other path can be reached.
+        if re.fullmatch(r"/js/[a-z][a-z0-9-]*\.js", path):
+            name = os.path.join(HERE, "web", "js", path[4:])
+            if os.path.isfile(name):
+                with open(name, "rb") as f:
+                    return self.send(200, f.read(), JS)
         if path in STATIC:
             name, ctype = STATIC[path]
             with open(os.path.join(HERE, name), "rb") as f:
