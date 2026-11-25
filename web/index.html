@@ -198,6 +198,7 @@
       <div class="total"><span>Total</span><span id="tonsTotal"></span></div>
       <div class="due"><label for="due">Arrive by</label>D+<input id="due" type="number" min="1" max="90" step="1" value="7">
         <span class="hint" style="margin:0">days from loading</span></div>
+      <div class="total" style="margin-top:10px" id="liftLine" title="The starting set, at the origin and ready on D+0. Illustrative figures, in cargo/lift_rules.json. Editing comes next."></div>
       <div class="sec">2 · From and to</div>
     </div>
     <label for="from">Origin port</label>
@@ -700,7 +701,8 @@ function renderResults() {
 // same shape, so one grid draws any lens. A lens never picks: each cell says whether it makes the
 // arrive-by date, and by how much. Each lens adds its own headline numbers and summary line below.
 const classList = ids => ids.length === 1 ? `Class ${ids[0]}` : `Classes ${ids.slice(0, -1).join(", ")} and ${ids[ids.length - 1]}`;
-const late = c => !c.available || c.days > due + 1e-9;
+// A cell makes the date when its last ton arrives by then (closure, with the lift on hand).
+const late = c => !c.available || c.closure == null || c.closure > due + 1e-9;
 const r1 = x => Math.round(x * 10) / 10;
 const signed = (x, d = 1) => `${x > 0 ? "+" : ""}${fmt(x, d)}`;
 const turnName = i => i ? `Turn ${i}` : "Start";
@@ -723,8 +725,8 @@ const LENS_UI = {
   mode: {
     showMode: false,
     metrics(r) {
-      const sea = r.rows.map(x => x.cells.sea), ok = sea.filter(c => c.available).map(c => c.days);
-      const bok = r.base ? r.base.rows.map(x => x.cells.sea).filter(c => c.available).map(c => c.days) : [];
+      const sea = r.rows.map(x => x.cells.sea), ok = sea.filter(c => c.closure != null).map(c => c.closure);
+      const bok = r.base ? r.base.rows.map(x => x.cells.sea).filter(c => c.closure != null).map(c => c.closure) : [];
       const span = d => !d.length ? null : Math.min(...d) === Math.max(...d) ? fmt(Math.max(...d), 1) : `${fmt(Math.min(...d), 1)} to ${fmt(Math.max(...d), 1)}`;
       let note = "";
       if (r.base) note = !bok.length ? "baseline had no sea route" : !ok.length ? `baseline ${span(bok)} days`
@@ -735,11 +737,11 @@ const LENS_UI = {
         const a = x.cells.air;
         if (late(x.cells.sea) && !late(a)) for (const k in a.sorties) need[k] = (need[k] || 0) + (x.short_tons || 0);
       }
-      const sorties = Object.entries(need).map(([k, t]) => [k, Math.ceil(t / meta.payload_st[k])]);
+      const sorties = Object.entries(need).map(([k, t]) => [k, Math.ceil(t / meta.lift.aircraft[k].planning_payload_st)]);
       const total = sorties.reduce((n, [, s]) => n + s, 0);
       const lateAny = lateEverywhere(r);
       return [
-        ["By sea, port to port", ok.length ? `${span(ok)} days` : "No route", note],
+        ["All by sea, last ton in", ok.length ? `${span(ok)} days` : "No route", note],
         [`Miss D+${due} by sea`, `${sea.filter(late).length} of ${sea.length}`, ""],
         [`Miss D+${due} any way`, `${lateAny.length}`, lateAny.length ? classList(lateAny) : "every class can make it"],
         [`Sorties to keep D+${due}`, fmt(total), total ? sorties.map(([k, s]) => `${fmt(s)} ${k}`).join(", ") : "none needed"],
@@ -755,6 +757,8 @@ const LENS_UI = {
       if (!first) return s + (r.rows[0].cells.sea.why || "No sea route.");
       const f = seaFacts(r, first);
       s += `${carrierPhrase(first)}: ${fmt(f.nm)} nm${f.via.length ? " via " + f.via.join(", ") : ""}.`;
+      const slow = r.rows.map(x => x.cells.sea).filter(c => c.limit).sort((a, b) => b.closure - a.closure)[0];
+      if (slow) s += ` By sea, the last ton waits on ${slow.limit}.`;
       const bfirst = r.base && r.base.rows.map(x => x.cells.sea).find(c => c.available);
       if (bfirst) {
         const dnm = f.nm - seaFacts(r.base, bfirst).nm, dd = r1(first.days - bfirst.days);
@@ -787,13 +791,16 @@ function cellHtml(c, bc, showMode) {
   const sub = [];
   if (showMode || (c.mode !== "sea" && c.mode !== "air")) sub.push(MODE_TEXT[c.mode]);
   if (c.plan && c.plan !== "commercial") sub.push(c.plan.split("_").join(", then "));
-  const m = r1(due - c.days);
+  if (c.closure == null) return `<span class="dd no">no lift</span><div class="sub">${esc(c.limit || "")}</div>`;
+  sub.push(`first ${fmt(c.days, 1)}`);
+  if (c.lift) sub.push(c.lift.kind === "ship" ? `${c.lift.loads} load${c.lift.loads === 1 ? "" : "s"}` : `${fmt(c.lift.sorties)} sorties`);
+  const m = r1(due - c.closure);
   sub.push(m >= 0 ? `${fmt(m, 1)} to spare` : `${fmt(-m, 1)} late`);
   if (bc) {
-    if (!bc.available) sub.push("was no way");
-    else { const d = r1(c.days - bc.days); if (d) sub.push(`${signed(d)} on baseline`); }
+    if (!bc.available || bc.closure == null) sub.push("was no way");
+    else { const d = r1(c.closure - bc.closure); if (d) sub.push(`${signed(d)} on baseline`); }
   }
-  return `<span class="dd ${late(c) ? "no" : "ok"}">${fmt(c.days, 1)} d</span><div class="sub">${sub.join(" · ")}</div>`;
+  return `<span class="dd ${late(c) ? "no" : "ok"}">${fmt(c.closure, 1)} d</span><div class="sub">${sub.join(" · ")}</div>`;
 }
 
 function renderCompare() {
@@ -821,7 +828,7 @@ function renderCompare() {
          (notes ? `<span class="note">${esc(notes)}</span>` : "") + `</td><td>${x.short_tons != null ? fmt(x.short_tons) : ""}</td>`;
     for (const col of r.columns) {
       const c = x.cells[col.id], on = picked && picked.cls === x.class && picked.col === col.id;
-      h += `<td class="c${on ? " pick" : ""}" data-col="${esc(col.id)}" title="${esc(c.why || "Click to show it on the map and see how the days are built")}">` +
+      h += `<td class="c${on ? " pick" : ""}" data-col="${esc(col.id)}" title="${esc([c.limit && "Last ton waits on " + c.limit, c.why, "Click to see how the days are built"].filter(Boolean).join(". "))}">` +
            cellHtml(c, baseCell(x.class, col.id), ui.showMode) + "</td>";
     }
     h += "</tr>";
@@ -846,11 +853,11 @@ function renderDetail() {
   const x = picked && r.rows.find(y => y.class === picked.cls), c = x && x.cells[picked.col];
   if (!c) {
     box.innerHTML = `<div class="dim">Click a cell to see its legs on the map and how its days are built. ` +
-      `Days are port to port: illustrative allowances, not planning factors.</div>`;
+      `Each cell is when the last ton arrives, with the lift on hand; the first arrival is underneath. Days are port to port. Illustrative allowances, not planning factors.</div>`;
     return;
   }
   const col = r.columns.find(k => k.id === picked.col);
-  let h = `<div class="t">Class ${x.class} ${esc(x.name)} · ${esc(col.label)}${c.available ? ` · ${fmt(c.days, 1)} days` : ""}</div>`;
+  let h = `<div class="t">Class ${x.class} ${esc(x.name)} · ${esc(col.label)}${c.available && c.closure != null ? ` · last ton in ${fmt(c.closure, 1)} days` : ""}</div>`;
   if (!c.available) { box.innerHTML = h + `<div>${esc(c.why || "No way there.")}</div>`; return; }
   let moving = 0, sea = false, air = false;
   const lines = c.legs.map(k => {
@@ -868,10 +875,16 @@ function renderDetail() {
   });
   const hd = meta.handling;
   const why = [sea && `${hd.ship_port_days} day in each port where cargo is worked`, air && `${hd.airfield_hours} hours at each airport`].filter(Boolean).join(", ");
+  h += `<div class="dim">First arrival, ${fmt(c.days, 1)} days:</div>`;
   h += `<ul>${lines.map(l => `<li>${l}</li>`).join("")}<li>Handling: ${fmt(Math.max(0, c.days - moving), 1)} days (${why})</li></ul>`;
-  const s = Object.entries(c.sorties);
-  if (s.length) h += `<div>Sorties: ${s.map(([k, n]) => `${fmt(n)} ${esc(meta.aircraft[k])} (${k})`).join(", ")}</div>`;
-  if (c.alt) h += `<div class="dim">By ${MODE_TEXT[c.alt.mode]}: ${fmt(c.alt.days, 1)} days.</div>`;
+  if (c.lift) {
+    const L = c.lift, shared = L.pool_st != null && L.pool_st !== x.short_tons ? `, shared with other classes: ${fmt(L.pool_st)} short tons in all` : "";
+    h += `<div>Last ton in: ${c.closure != null ? fmt(c.closure, 1) + " days" : "can't, with the lift on hand"}. ` +
+         (L.kind === "ship" ? `Lift: ${L.count} ${esc(L.name)}${L.count === 1 ? "" : "s"} of ${fmt(L.capacity_st)} short tons, ${L.loads} load${L.loads === 1 ? "" : "s"}${shared}.`
+                            : `Lift: ${L.count} ${esc(L.name)}, ${fmt(L.planning_payload_st)} short tons a sortie, ${fmt(L.sorties)} sorties${shared}.`) +
+         (c.limit ? ` The last ton waits on ${esc(c.limit)}.` : " One load does it: nothing makes it wait.") + `</div>`;
+  }
+  if (c.alt) h += `<div class="dim">By ${MODE_TEXT[c.alt.mode]}: last ton in ${c.alt.closure != null ? fmt(c.alt.closure, 1) + " days" : "can't, with the lift on hand"}.</div>`;
   if (c.why) h += `<div class="dim">${esc(c.why)}</div>`;
   const flags = c.flags.filter(f => f.level !== "note");
   if (flags.length) h += `<ul>${flags.map(f => `<li><span class="pill ${f.level}">${f.level}</span> ${esc(f.text)}</li>`).join("")}</ul>`;
@@ -1145,6 +1158,8 @@ async function boot() {
     el("classes").appendChild(row);
   }
   showTons();
+  const lf = meta.lift, one = (n, name) => `${n} ${name.replace(/ \(.*\)$/, "").toLowerCase()}${n === 1 ? "" : "s"}`;
+  el("liftLine").innerHTML = `<span>Lift</span><span style="text-align:right">${[...Object.values(lf.ships), ...Object.values(lf.aircraft)].map(x => one(x.count, x.name)).join(", ")}</span>`;
   el("due").oninput = () => { const v = Math.round(+el("due").value); if (v >= 1) { due = v; renderCompare(); } };
   for (const l of meta.lenses) el("lens").appendChild(new Option(l.label, l.id));
   el("lens").onchange = () => { lens = el("lens").value; picked = null; go(true); };

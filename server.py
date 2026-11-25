@@ -16,7 +16,7 @@ Python 3, stdlib only. All routing lives in sea_routing.py.
                                "cargo": [{"class": "I", "short_tons": 500}, ...], "priority": "urgent"}
                               areas of denial close the water to everyone, a WEZ to
                               commercial carriers only; see cargo_movement.py
-    POST /api/compare         {"from", "to", "cargo", "areas", "wez", "lens": "mode" | "pod",
+    POST /api/compare         {"from", "to", "cargo", "areas", "wez", "lens": "mode" | "pod", "lift": {type: count},
                                "base": {"areas": [...], "wez": [...]}}   the planner screen's grid,
                               for this situation and the baseline's; see comparisons.py
 """
@@ -227,13 +227,18 @@ def find_compare(body):
         raise BadRequest("lens must be one of: " + ", ".join(comparisons.LENSES) + ".")
     cargo = parse_cargo(body) or PLANNER.default_cargo()
     countries = parse_countries(body)
+    lift = body.get("lift")
+    known = comparisons.LIFT.counts()
+    if lift is not None and not (isinstance(lift, dict) and all(
+            k in known and isinstance(v, int) and 0 <= v <= 1000 for k, v in lift.items())):
+        raise BadRequest("lift must be {type: count}, counts 0 to 1,000, types: " + ", ".join(known) + ".")
     base = body.get("base")
     if base is not None and not isinstance(base, dict):
         raise BadRequest("base must be {\"areas\": [...], \"wez\": [...]}.")
 
     def run(raw_areas, raw_wez):
-        key = json.dumps([lens, origin, goal, cargo, countries, raw_areas or [], raw_wez or []], sort_keys=True)
-        s = {"origin": origin, "goal": goal, "cargo": cargo, "countries": countries,
+        key = json.dumps([lens, origin, goal, cargo, countries, lift, raw_areas or [], raw_wez or []], sort_keys=True)
+        s = {"origin": origin, "goal": goal, "cargo": cargo, "countries": countries, "lift": lift,
              "denial": parse_areas(raw_areas), "wez": parse_areas(raw_wez)}
         with LOCK:
             if key not in COMPARED:
@@ -286,6 +291,7 @@ CARGO_META = {
     "payload_st": {k: v["payload_st"] for k, v in PLANNER.air_rules["aircraft"].items() if not k.startswith("_")},
     "knots": {k: v["knots"] for k, v in PLANNER.rules["carriers"].items() if not k.startswith("_")},
     "handling": {k: v for k, v in PLANNER.air_rules["handling"].items() if not k.startswith("_")},
+    "lift": comparisons.LIFT.summary(),
     "lenses": [{"id": k, "label": v["label"], "note": v["note"]} for k, v in comparisons.LENSES.items()],
     "scenarios": cargo_scenarios(),
 }

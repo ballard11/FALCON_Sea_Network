@@ -1,0 +1,65 @@
+{
+  "_note": "Lift and throughput for closure (when the last ton arrives); see lift.py and the Lift layer spec in the Program Hub. Every figure is marked: 'illustrative' means chosen by Claude for the demo, not a planning factor. Change a figure here and nothing else: no code change is needed. Stage 1: the starting set sits at the origin, ready on D+0.",
+  "ships": {
+    "_note": "Capacity in short tons only; deck area is not modelled (decided 25 Nov 2026). Sailing time is the route's, at the carrier speed in movement_rules.json; the ship type sets only how much one load carries.",
+    "cargo": {
+      "name": "Commercial cargo ship",
+      "classes": ["I", "II", "IV", "V", "VI", "VIII", "IX"],
+      "capacity_st": 10000,
+      "count": 2,
+      "sources": {"capacity_st": "illustrative", "count": "illustrative"}
+    },
+    "sealift": {
+      "name": "Military sealift ship (LMSR class)",
+      "classes": ["VII"],
+      "capacity_st": 12000,
+      "count": 1,
+      "sources": {
+        "capacity_st": "illustrative. For reference only: 312,461 sq ft of deck (T-AKR 295), https://man.fas.org/dod-101/sys/ship/takr-295.htm, opened 25 Nov 2026; deck area is not used",
+        "count": "illustrative"
+      }
+    },
+    "tanker": {
+      "name": "Tanker",
+      "classes": ["III"],
+      "capacity_st": 30000,
+      "count": 1,
+      "sources": {"capacity_st": "illustrative", "count": "illustrative"}
+    }
+  },
+  "aircraft": {
+    "_note": "Planning payload (allowable cabin load), not the maximum in air_rules.json: planners use it on long legs. Ground hours are per stop, block-in to block-out.",
+    "commercial": {
+      "name": "Wide-body freighter (777F class)",
+      "planning_payload_st": 80,
+      "ground_hours": 5.0,
+      "count": 4,
+      "sources": {
+        "planning_payload_st": "illustrative: a Gemini summary of AFPAM 10-1403 gave 75 to 85 short tons, unverified (no table or page)",
+        "ground_hours": "illustrative: the same summary gave 4 to 6 hours, unverified",
+        "count": "illustrative"
+      }
+    },
+    "military": {
+      "name": "Strategic airlifter (C-17 class)",
+      "planning_payload_st": 45,
+      "ground_hours": 2.75,
+      "count": 6,
+      "sources": {
+        "planning_payload_st": "illustrative: the same summary gave '145.0 short tons (~90,000 lbs)'; 90,000 lb is 45 short tons. Unverified",
+        "ground_hours": "illustrative: the same summary gave 2.25 to 3.25 hours, unverified",
+        "count": "illustrative"
+      }
+    }
+  },
+  "ports": {
+    "_note": "Short tons a day a port can load or discharge, by World Port Index harbor size (the WPI has no rates). '' is a port with no size.",
+    "rate_st_per_day": {"Large": 4000, "Medium": 2000, "Small": 800, "Very Small": 300, "": 300},
+    "sources": {"rate_st_per_day": "illustrative"}
+  },
+  "airfields": {
+    "_note": "Working MOG: aircraft an airfield can load or unload at once, by OurAirports type. Sorties a day = working MOG x 24 / ground hours.",
+    "working_mog": {"large_airport": 4, "medium_airport": 2},
+    "sources": {"working_mog": "illustrative"}
+  }
+}

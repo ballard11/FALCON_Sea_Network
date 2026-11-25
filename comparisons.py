@@ -21,7 +21,12 @@ the lens, so the screen draws any lens the same way:
      "handover": {...} or None, "transfer": {...} or None,
      "sorties": {"commercial": n, "military": n},
      "flags": [{"level", "code", "name", "text"}],
-     "alt": {"mode", "days"} or None}            the other way there, when a lens shows only the soonest
+     "alt": {"mode", "days", "closure"} or None, the other way there, when a lens shows only the soonest
+     "closure": float or None,                   when the last ton arrives, with the lift on hand (lift.py)
+     "lift": {...}, "limit": text or None}       what carries it, and what sets the closure
+
+"days" is the first arrival. A column is one way of moving all the cargo, so
+classes in it share ships, aircraft, ports and airfields (see lift.py).
 
 A lens compares; it never ranks or picks. The screen marks which cells make the
 arrive-by date. To add a comparison, write lens(planner, scenario) returning
@@ -31,7 +36,10 @@ arrive-by date. To add a comparison, write lens(planner, scenario) returning
 import math
 
 from cargo_movement import FLAG_NAMES
+from lift import Lift
 from sea_routing import great_circle_nm
+
+LIFT = Lift.load()
 
 POD_RADIUS_NM = 300          # alternate ports of debarkation: within this distance of the destination ...
 POD_ALTERNATES = 3           # ... the nearest few Medium or Large harbors
@@ -94,9 +102,16 @@ def _row(P, item, cells):
     return {"class": cid, "name": P.classes[cid]["name"], "short_tons": item.get("short_tons"), "cells": cells}
 
 
+def _close(P, s, rows, legs):
+    """Closure for every cell: everything by sea, and everything by air, each pooled."""
+    LIFT.close(P, {"sea": [(i["class"], i.get("short_tons"), sea) for i, sea, _ in rows],
+                   "air": [(i["class"], i.get("short_tons"), air) for i, _, air in rows]}, legs, s.get("lift"))
+
+
 def by_mode(P, s):
     """By sea against by air (air only, or air then sea when no flight reaches)."""
     rows, legs = _ways(P, s, s["goal"])
+    _close(P, s, rows, legs)
     return {"columns": [{"id": "sea", "label": "By sea", "sub": "port to port"},
                         {"id": "air", "label": "By air", "sub": "or air, then sea"}],
             "rows": [_row(P, item, {"sea": sea, "air": air}) for item, sea, air in rows], "legs": legs}
@@ -118,17 +133,19 @@ def alternate_ports(P, s, radius_nm=POD_RADIUS_NM, n=POD_ALTERNATES):
 
 
 def _soonest(sea, air):
+    """The way that closes soonest (or, when neither can close with the lift on hand, arrives first)."""
     ways = [w for w in (sea, air) if w["available"]]
     if not ways:
         return dict(sea, why="%s %s" % (sea["why"] or "No sea route.", air["why"] or ""))
-    best = min(ways, key=lambda w: w["days"])
+    best = min(ways, key=lambda w: (w["closure"] is None, w["closure"] if w["closure"] is not None else w["days"]))
     other = air if best is sea else sea
-    return dict(best, alt={"mode": other["mode"], "days": other["days"]} if other["available"] else None)
+    return dict(best, alt={"mode": other["mode"], "days": other["days"], "closure": other["closure"]}
+                if other["available"] else None)
 
 
 def by_port(P, s):
     """The destination against nearby ports of debarkation. Each cell is the
-    soonest way to that port; days stop there (no onward land leg yet)."""
+    way that closes soonest at that port; days stop there (no onward land leg yet)."""
     g, goal = P.g, s["goal"]
     ports = [(goal, 0.0)] + alternate_ports(P, s)
     columns, cells, legs = [], {}, {}
@@ -136,6 +153,7 @@ def by_port(P, s):
         columns.append({"id": p, "label": g.ports[p]["name"],
                         "sub": "the destination" if p == goal else "%s nm away" % format(round(d), ",")})
         rows, more = _ways(P, s, p)
+        _close(P, s, rows, more)
         legs.update(more)
         for item, sea, air in rows:
             cells.setdefault(item["class"], (item, {}))[1][p] = _soonest(sea, air)
@@ -148,7 +166,7 @@ LENSES = {
                      "when no flight reaches the far end."},
     "pod": {"label": "Port of debarkation", "run": by_port,
             "note": "The destination against the nearest %d Medium or Large harbors within %d nm. Each cell is the "
-                    "soonest way to that port." % (POD_ALTERNATES, POD_RADIUS_NM)},
+                    "way that closes soonest at that port." % (POD_ALTERNATES, POD_RADIUS_NM)},
 }
 
 
