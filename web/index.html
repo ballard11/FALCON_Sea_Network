@@ -122,6 +122,21 @@
   body.cargo #left { width: 330px; }
   #right { width: 440px; border-right: none; border-left: 1px solid var(--line); }
   body.no-left #left, body.no-right #right { display: none; }
+  #liftDrawer { width: 330px; display: none; }
+  body.cargo.lift-open #liftDrawer { display: block; }
+  body.lift-open #left, body.no-left #liftDrawer { display: none !important; }
+  .lt { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
+  .lt.changed { border-color: #4a6378; background: #18222c; }
+  .lt .top { justify-content: space-between; font-size: 13px; }
+  .lt .via { margin-top: 1px; }
+  .stepper { display: flex; align-items: center; gap: 4px; flex: none; }
+  .stepper button { width: 26px; padding: 2px 0; font-size: 14px; }
+  .stepper input { width: 52px; padding: 3px 4px; text-align: center; }
+  .lt .use { font-size: 11.5px; color: var(--dim); margin-top: 3px; }
+  .lt .use b { color: var(--ink); font-weight: 600; }
+  .liftline { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--dim); }
+  .liftline span { flex: 1; }
+  .liftline button { width: auto; padding: 3px 10px; font-size: 12px; }
   .sec.first { margin-top: 14px; }
   .cl { display: grid; grid-template-columns: 18px 34px minmax(0, 1fr) 76px; gap: 6px; align-items: center;
         font-size: 12.5px; margin-bottom: 3px; }
@@ -198,7 +213,7 @@
       <div class="total"><span>Total</span><span id="tonsTotal"></span></div>
       <div class="due"><label for="due">Arrive by</label>D+<input id="due" type="number" min="1" max="90" step="1" value="7">
         <span class="hint" style="margin:0">days from loading</span></div>
-      <div class="total" style="margin-top:10px" id="liftLine" title="The starting set, at the origin and ready on D+0. Illustrative figures, in cargo/lift_rules.json. Editing comes next."></div>
+      <div class="liftline"><span id="liftLine" title="Ships and aircraft on hand for this turn, at the origin and ready on D+0. Illustrative figures, in cargo/lift_rules.json."></span><button id="editLift">Edit lift</button></div>
       <div class="sec">2 · From and to</div>
     </div>
     <label for="from">Origin port</label>
@@ -228,6 +243,13 @@
     <div id="msg"></div>
     <div class="routes-only"><div id="summary"></div>
     <ol id="results"></ol></div>
+  </aside>
+  <aside id="liftDrawer" class="cargo-only" aria-label="Lift on hand">
+    <div class="top" style="justify-content:space-between"><span id="liftHead">Lift on hand</span><button id="closeLift" class="mini">Done</button></div>
+    <p class="hint">Ships and aircraft on hand for this turn, at the origin and ready on D+0. Change a count to see which classes slip; losing a ship can be a turn of its own. Figures are illustrative, in cargo/lift_rules.json.</p>
+    <div class="sec first">Ships</div><div id="liftShips"></div>
+    <div class="sec">Aircraft</div><div id="liftAir"></div>
+    <button id="resetLift" style="margin-top:10px">Reset to the starting set</button>
   </aside>
   <div class="map">
     <div class="turns cargo-only">
@@ -303,7 +325,7 @@ let appMode = "routes", drawKind = "denial", meta = null, tons = {}, labelOf = {
 let opts = null, routeView = "sea";     // Routes: the transport options (by sea, by air), and which one the map shows
 // Cargo: turns change the situation (areas); the move (ports, cargo, arrive-by) stays the same across turns.
 // `areas` is always the current turn's own list. cmp is the comparison for the current turn (and its baseline).
-let turns = [{ areas }], cur = 0, base = 0, lens = "mode", due = 7, cmp = null, picked = null, hoverRow = null;
+let turns = [{ areas, lift: {} }], cur = 0, base = 0, lens = "mode", due = 7, cmp = null, picked = null, hoverRow = null;
 const denialAreas = () => areas.filter(a => a.kind !== "wez");
 const wezAreas = () => areas.filter(a => a.kind === "wez");
 const plain = list => list.map(({ kind, ...a }) => a);
@@ -894,10 +916,80 @@ function renderDetail() {
 // ------------------------------------------------------ cargo: turns
 // Each turn holds its own situation (areas and WEZs). Add turn copies the current one, so the next
 // change is recorded as a new turn. The baseline is the turn every other turn is compared with.
-function situation(list) {
-  const d = list.filter(a => a.kind !== "wez").length, w = list.length - d;
+function situation(t) {
+  const d = t.areas.filter(a => a.kind !== "wez").length, w = t.areas.length - d;
   const parts = [d && `${d} area${d === 1 ? "" : "s"} of denial`, w && `${w} WEZ${w === 1 ? "" : "s"}`].filter(Boolean);
-  return parts.length ? parts.join(", ") : "no areas";
+  if (!parts.length) parts.push("no areas");
+  // Lift that differs from the starting set: "-1 tanker", "+4 C-17".
+  for (const [k, x] of liftTypes()) {
+    const n = t.lift[k] ?? x.count;
+    if (n !== x.count) parts.push(`${n > x.count ? "+" : ""}${n - x.count} ${shortName(x.name)}`);
+  }
+  return parts.join(", ");
+}
+
+// ------------------------------------------------------ cargo: lift editor
+// Each turn holds its own lift counts ({type: count}, only those changed from the starting set).
+const liftTypes = () => meta ? [...Object.entries(meta.lift.ships), ...Object.entries(meta.lift.aircraft)] : [];
+const shortName = name => { const m = name.match(/\((.*) class\)$/); return m ? m[1] : name.replace(/ \(.*\)$/, "").toLowerCase(); };
+const liftCount = (t, k) => t.lift[k] ?? Object.fromEntries(liftTypes())[k].count;
+const liftBody = t => Object.fromEntries(liftTypes().map(([k]) => [k, liftCount(t, k)]));
+
+function renderLiftLine() {
+  const t = turns[cur];
+  el("liftLine").textContent = "Lift: " + liftTypes().map(([k, x]) => `${liftCount(t, k)} ${shortName(x.name)}`).join(", ");
+}
+
+// What each type carries in the current result: loads or sorties, and whether the last ton waits on it.
+function liftUse(k) {
+  if (!cmp) return "";
+  let used = null, binds = false;
+  for (const r of cmp.rows) for (const c of Object.values(r.cells)) {
+    if (!c.lift || c.lift.type !== k) continue;
+    used = Math.max(used ?? 0, c.lift.kind === "ship" ? c.lift.loads : c.lift.sorties);
+    if (c.limit && (c.limit.startsWith(`${c.lift.count} ${c.lift.name}`) || c.limit.startsWith("No "))) binds = true;
+  }
+  if (used == null) return "Not used in this comparison.";
+  const what = k in meta.lift.ships ? `${used} load${used === 1 ? "" : "s"}` : `${fmt(used)} sorties`;
+  return `Carries <b>${what}</b>${binds ? " · <b>the last ton waits on these</b>" : ""}`;
+}
+
+function renderLift() {
+  if (!meta) return;
+  renderLiftLine();
+  if (!document.body.classList.contains("lift-open")) return;
+  const t = turns[cur];
+  el("liftHead").textContent = `Lift on hand · ${turnName(cur)}`;
+  for (const [box, group] of [["liftShips", meta.lift.ships], ["liftAir", meta.lift.aircraft]]) {
+    el(box).innerHTML = "";
+    for (const [k, x] of Object.entries(group)) {
+      const n = liftCount(t, k), div = document.createElement("div");
+      div.className = "lt" + (n !== x.count ? " changed" : "");
+      const info = x.capacity_st != null ? `${fmt(x.capacity_st)} short tons a load · carries ${x.classes.join(", ")}`
+                                         : `${fmt(x.planning_payload_st)} short tons a sortie · ${fmt(x.ground_hours, 2)} h on the ground`;
+      div.innerHTML = `<div class="top"><span>${esc(x.name)}</span><span class="stepper">` +
+        `<button aria-label="One fewer">−</button><input type="number" min="0" max="1000" step="1" value="${n}" aria-label="${esc(x.name)} on hand">` +
+        `<button aria-label="One more">+</button></span></div><div class="via">${info}${n !== x.count ? ` · starting set ${x.count}` : ""}</div>` +
+        `<div class="use">${liftUse(k)}</div>`;
+      const [minus, input, plus] = div.querySelectorAll(".stepper > *");
+      const set = v => { v = Math.max(0, Math.min(1000, Math.round(v) || 0)); if (v === x.count) delete t.lift[k]; else t.lift[k] = v; liftChanged(); };
+      minus.onclick = () => set(liftCount(t, k) - 1);
+      plus.onclick = () => set(liftCount(t, k) + 1);
+      input.onchange = () => set(+input.value);
+      el(box).appendChild(div);
+    }
+  }
+}
+
+let liftTimer = null;
+function liftChanged() {
+  renderTurns();
+  clearTimeout(liftTimer); liftTimer = setTimeout(go, 250);
+}
+
+function openLift(open) {
+  document.body.classList.toggle("lift-open", open);
+  renderLift(); setView(view);
 }
 
 function renderTurns() {
@@ -905,12 +997,13 @@ function renderTurns() {
   turns.forEach((t, i) => {
     const b = document.createElement("button");
     b.className = "turn" + (i === cur ? " on" : "");
-    b.innerHTML = `${turnName(i)} · ${esc(situation(t.areas))}${i === base ? '<span class="basetag">baseline</span>' : ""}` +
+    b.innerHTML = `${turnName(i)} · ${esc(situation(t))}${i === base ? '<span class="basetag">baseline</span>' : ""}` +
                   (turns.length > 1 ? `<span class="x" title="Remove this turn">×</span>` : "");
     b.onclick = e => e.target.classList.contains("x") ? removeTurn(i) : selectTurn(i);
     box.appendChild(b);
   });
   el("setBase").style.display = cur === base ? "none" : "";
+  renderLift();
 }
 
 function selectTurn(i) {
@@ -963,8 +1056,8 @@ async function goCargo(fit) {
   const cargo = meta.classes.filter(c => el("cls-" + c.id).checked).map(c => ({ class: c.id, short_tons: tons[c.id] }));
   if (!cargo.length) { msg.className = "err"; msg.textContent = "Pick at least one class of supply."; cmp = null; renderCompare(); drawCargo(); return; }
   const split = list => ({ areas: plain(list.filter(a => a.kind !== "wez")), wez: plain(list.filter(a => a.kind === "wez")) });
-  const body = { from: currentFrom, to: currentTo, cargo, lens, ...split(turns[cur].areas),
-                 base: cur === base ? null : split(turns[base].areas) };
+  const body = { from: currentFrom, to: currentTo, cargo, lens, ...split(turns[cur].areas), lift: liftBody(turns[cur]),
+                 base: cur === base ? null : { ...split(turns[base].areas), lift: liftBody(turns[base]) } };
   msg.className = ""; msg.textContent = "";
   el("csum").textContent = "Working it out...";
   const ticket = ++pending;
@@ -974,7 +1067,7 @@ async function goCargo(fit) {
   cmp = data;
   if (picked && !(cmp.rows.some(r => r.class === picked.cls) && cmp.columns.some(c => c.id === picked.col))) picked = null;
   el("right").title = `Worked out in ${data.ms} ms`;
-  renderCompare(); drawCargo(); drawMarks();
+  renderCompare(); renderLift(); drawCargo(); drawMarks();
   if (fit) fitRoutes();
 }
 
@@ -1009,6 +1102,7 @@ function setAppMode(m) {
   el("modeRoutes").classList.toggle("on", m === "routes");
   el("modeCargo").classList.toggle("on", m === "cargo");
   last = null; opts = null; cmp = null; picked = null; routeView = "sea";
+  if (m !== "cargo") document.body.classList.remove("lift-open");
   setMode(null); renderResults(); renderOptions(); renderCompare(); renderTurns(); drawRoutes(); drawMarks(); setView(view);
   go(true);
 }
@@ -1020,7 +1114,7 @@ function loadScenario(id) {
   el("from").value = labelOf[sc.from]; el("to").value = labelOf[sc.to];
   // A scenario's areas become Turn 1, against a Start with none: the change they make is the point.
   const own = [...sc.areas.map(a => ({ kind: "denial", ...a })), ...sc.wez.map(a => ({ kind: "wez", ...a }))];
-  turns = own.length ? [{ areas: [] }, { areas: own }] : [{ areas: [] }];
+  turns = own.length ? [{ areas: [], lift: {} }, { areas: own, lift: {} }] : [{ areas: [], lift: {} }];
   base = 0; cur = turns.length - 1; areas = turns[cur].areas; picked = null;
   tons = Object.fromEntries(meta.classes.map(c => [c.id, c.short_tons]));
   for (const c of meta.classes) el("cls-" + c.id).checked = false;
@@ -1158,13 +1252,15 @@ async function boot() {
     el("classes").appendChild(row);
   }
   showTons();
-  const lf = meta.lift, one = (n, name) => `${n} ${name.replace(/ \(.*\)$/, "").toLowerCase()}${n === 1 ? "" : "s"}`;
-  el("liftLine").innerHTML = `<span>Lift</span><span style="text-align:right">${[...Object.values(lf.ships), ...Object.values(lf.aircraft)].map(x => one(x.count, x.name)).join(", ")}</span>`;
+  el("editLift").onclick = () => openLift(true);
+  el("closeLift").onclick = () => openLift(false);
+  el("resetLift").onclick = () => { turns[cur].lift = {}; liftChanged(); };
+  renderLiftLine();
   el("due").oninput = () => { const v = Math.round(+el("due").value); if (v >= 1) { due = v; renderCompare(); } };
   for (const l of meta.lenses) el("lens").appendChild(new Option(l.label, l.id));
   el("lens").onchange = () => { lens = el("lens").value; picked = null; go(true); };
   el("addTurn").onclick = () => {
-    turns.push({ areas: areas.map(a => ({ ...a })) });
+    turns.push({ areas: areas.map(a => ({ ...a })), lift: { ...turns[cur].lift } });
     cur = turns.length - 1; areas = turns[cur].areas; picked = null;
     setMode(null); drawAreas(); go();
   };
