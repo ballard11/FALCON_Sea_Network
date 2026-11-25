@@ -9,7 +9,7 @@
     --bg: #11161c; --panel: #172029; --line: #2b3742; --ink: #e6edf3; --dim: #8b9bab;
     --ocean: #0a1a26; --land: #27343f; --coast: #445a6b; --bad: #e8604c; --deny: #e8604c;
     --origin: #4ad4a0; --dest: #e8604c; --orig-route: #9aa8b6;
-    --wez: #c58bdd; --commercial: #4a9eda; --military: #e8b04c;
+    --wez: #c58bdd; --commercial: #4a9eda; --military: #e8b04c; --port: #c9d6e2; --airfield: #7fb0ee;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -59,6 +59,14 @@
   svg.drawing { cursor: crosshair; }
   .tools { position: absolute; left: 12px; top: 12px; display: flex; gap: 6px; }
   .tools button { width: auto; padding: 4px 10px; font-size: 12px; font-weight: 500; background: rgba(17,22,28,.9); }
+  .tools button.layer { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
+  .tools button.layer.on { color: var(--ink); border-color: #4a6378; background: rgba(29,40,51,.95); }
+  .tools .gap { width: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--port); flex: none; }
+  .dot.air { background: var(--airfield); }
+  #tip { position: absolute; display: none; pointer-events: none; max-width: 320px; padding: 7px 10px;
+         background: rgba(17,22,28,.96); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; line-height: 1.45; }
+  #tip b { color: #fff; } #tip .dim { color: var(--dim); }
   .lbl { fill: var(--ink); paint-order: stroke; stroke: var(--bg); font-weight: 600; pointer-events: none; }
   body.cargo .routes-only, body:not(.cargo) .cargo-only { display: none; }
   .tabs, .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -154,9 +162,12 @@
   <div class="map">
     <svg id="svg" preserveAspectRatio="xMidYMid meet" aria-label="Map of sea routes">
       <rect id="ocean" fill="var(--ocean)"/>
-      <g id="land"></g><g id="areas"></g><g id="routes"></g><g id="draft"></g><g id="marks"></g>
+      <g id="land"></g><g id="nodes"></g><g id="areas"></g><g id="routes"></g><g id="draft"></g><g id="marks"></g><g id="hover"></g>
     </svg>
-    <div class="tools"><button id="fit">Fit routes</button><button id="world">World</button></div>
+    <div class="tools"><button id="fit">Fit routes</button><button id="world">World</button><span class="gap"></span>
+      <button id="showPorts" class="layer" title="Every port. Bigger dot = bigger harbor, as rated in NGA's World Port Index (Very Small to Large). The rating doesn't track military importance: Diego Garcia is Very Small."><span class="dot"></span><span id="portCount">Ports</span></button>
+      <button id="showAirfields" class="layer" title="Every airport with a paved runway of 8,000 ft or more. Bigger dot = OurAirports rates it large rather than medium. Most military airfields are rated medium."><span class="dot air"></span><span id="airCount">Airports</span></button></div>
+    <div id="tip"></div>
   </div>
 </div>
 
@@ -218,7 +229,7 @@ function setView(v) {
   svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
   const o = el("ocean");
   o.setAttribute("x", x - w); o.setAttribute("y", y - h); o.setAttribute("width", w * 3); o.setAttribute("height", h * 3);
-  drawMarks(); drawDraft();
+  drawMarks(); drawDraft(); clearHover();
 }
 const scale = () => view.w / W;          // map units per screen-sized unit at this zoom
 
@@ -358,6 +369,70 @@ function drawMarks() {
     t.textContent = `${role}: ${p.name}`;
     g.appendChild(t);
   }
+}
+
+// ------------------------------------------------------------ map layers
+// Every port and airport as a dot, sized by the dataset's own size rating: NGA World Port Index harbor
+// size for ports, OurAirports' type for airports. One path per size of zero-length round-capped
+// strokes, so each dot stays the same size on screen at any zoom without redrawing.
+const NODE = { port: { colour: "var(--port)", source: "World Port Index",
+                       px: { Large: 8, Medium: 6, Small: 4.5, "Very Small": 3, "": 3 } },
+               air: { colour: "var(--airfield)", source: "OurAirports", px: { Large: 7.5, Medium: 5 } } };
+let portList = [], airfields = [], layers = { port: true, air: true }, hovered = null;
+
+function drawNodes() {
+  const g = el("nodes"); g.innerHTML = "";
+  for (const kind of ["port", "air"]) {
+    if (!layers[kind]) continue;
+    const list = kind === "port" ? portList : airfields;
+    for (const [size, px] of Object.entries(NODE[kind].px)) {       // biggest first, so small dots sit on top
+      const d = list.filter(n => n.size === size).map(n => `M${n.x.toFixed(2)} ${n.y.toFixed(2)}h0`).join("");
+      if (d) g.appendChild(svgEl("path", { d, fill: "none", stroke: NODE[kind].colour, "stroke-width": px,
+        "stroke-linecap": "round", "stroke-opacity": 0.8, "vector-effect": "non-scaling-stroke" }));
+    }
+  }
+  el("showPorts").classList.toggle("on", layers.port);
+  el("showAirfields").classList.toggle("on", layers.air);
+}
+
+function nodeAt(e) {               // the nearest visible port or airfield within 7 px of the pointer
+  const [mx, my] = toMap(e);
+  let best = null, bd = 7 * view.w / svg.getBoundingClientRect().width;
+  for (const kind of ["air", "port"]) {
+    if (!layers[kind]) continue;
+    for (const n of kind === "port" ? portList : airfields) {
+      const dx = Math.abs(n.x - mx), dy = Math.abs(n.y - my);
+      if (dx > bd || dy > bd) continue;
+      const d = Math.hypot(dx, dy);
+      if (d < bd) { bd = d; best = { kind, n }; }
+    }
+  }
+  return best;
+}
+
+function clearHover() {
+  hovered = null; el("hover").innerHTML = ""; el("tip").style.display = "none";
+}
+
+function showHover(hit, e) {          // what it is, and its size as the source dataset rates it
+  if (!hit) return clearHover();
+  const tip = el("tip"), box = tip.parentElement.getBoundingClientRect();
+  if (!hovered || hovered.n !== hit.n) {
+    hovered = hit;
+    const n = hit.n, g = el("hover"), r = view.w / svg.getBoundingClientRect().width;
+    const name = hit.kind === "air" && n.code ? `${n.name} (${n.code})` : n.name;
+    const size = hit.kind === "port" ? (n.size ? `harbor size ${n.size}` : "harbor size not rated") : `rated ${n.size}`;
+    tip.innerHTML = `<b>${esc(name)}</b>${n.country ? ", " + esc(n.country) : ""}` +
+                    `<br><span class="dim">${hit.kind === "port" ? "Port" : "Airport"} · ${esc(size)} (${NODE[hit.kind].source})</span>`;
+    g.innerHTML = "";
+    g.appendChild(svgEl("circle", { cx: n.x, cy: n.y, r: 6 * r, fill: "none", stroke: "#fff",
+      "stroke-width": 2, "vector-effect": "non-scaling-stroke" }));
+    tip.style.display = "block";
+  }
+  let x = e.clientX - box.left + 14, y = e.clientY - box.top + 14;
+  if (x + tip.offsetWidth > box.width - 8) x = e.clientX - box.left - tip.offsetWidth - 14;
+  if (y + tip.offsetHeight > box.height - 8) y = e.clientY - box.top - tip.offsetHeight - 14;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
 }
 
 // -------------------------------------------------------------- results
@@ -580,8 +655,9 @@ svg.addEventListener("pointermove", e => {
     view = { ...pan.view, x: pan.view.x - (e.clientX - pan.x) / r.width * pan.view.w,
                           y: pan.view.y - (e.clientY - pan.y) / r.height * pan.view.h };
     setView(view);
-  }
+  } else if (!mode) showHover(nodeAt(e), e);
 });
+svg.addEventListener("pointerleave", () => clearHover());
 svg.addEventListener("pointerup", e => {
   if (mode === "circle" && draft) {
     if (draft.radius_nm >= 1) addArea({ type: "circle", center: draft.center, radius_nm: Math.round(draft.radius_nm) });
@@ -626,6 +702,14 @@ async function boot() {
     stroke: "var(--coast)", "stroke-width": 0.7, "vector-effect": "non-scaling-stroke" }));
 
   const ports = await (await fetch("/api/ports")).json();
+  airfields = await (await fetch("/api/airfields")).json();
+  for (const n of [...ports, ...airfields]) [n.x, n.y] = projection([n.lon, n.lat]);
+  portList = ports;
+  el("portCount").textContent = `Ports ${fmt(ports.length)}`;
+  el("airCount").textContent = `Airports ${fmt(airfields.length)}`;
+  el("showPorts").onclick = () => { layers.port = !layers.port; drawNodes(); clearHover(); };
+  el("showAirfields").onclick = () => { layers.air = !layers.air; drawNodes(); clearHover(); };
+  drawNodes();
   const count = {};
   for (const p of ports) { const b = p.country ? `${p.name}, ${p.country}` : p.name; count[b] = (count[b] || 0) + 1; }
   const list = el("ports");

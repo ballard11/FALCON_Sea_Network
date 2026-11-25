@@ -49,6 +49,11 @@ PLANNER = CargoPlanner(GRAPH)
 PORT_LIST = sorted(({"id": pid, "name": p["name"], "country": p["country"] or "",
                      "lat": float(p["lat"]), "lon": float(p["lon"]), "size": p["harbor_size"] or ""}
                     for pid, p in GRAPH.ports.items()), key=lambda p: (p["name"], p["country"]))
+# "size" is OurAirports' own type, large or medium (see neo4j-datamodel/ASSUMPTIONS.md, Airfields).
+AIRFIELD_LIST = sorted(({"id": fid, "code": r["icao_code"] or r["iata_code"] or "", "name": r["name"],
+                         "country": r["country_code"], "lat": float(r["lat"]), "lon": float(r["lon"]),
+                         "size": r["airport_type"].replace("_airport", "").capitalize()}
+                        for fid, r in PLANNER.air.fields.items()), key=lambda a: a["name"])
 
 
 class BadRequest(Exception):
@@ -240,6 +245,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path == "/api/ports":
             return self.send_json(200, PORT_LIST)
+        if path == "/api/airfields":
+            return self.send_json(200, AIRFIELD_LIST)
         if path == "/api/cargo/meta":
             return self.send_json(200, CARGO_META)
         if path in STATIC:
