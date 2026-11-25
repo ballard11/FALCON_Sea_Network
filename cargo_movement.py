@@ -300,6 +300,35 @@ class CargoPlanner:
         self._choose_modes(out, cargo, priority, denial, wez, handover_countries, closed)
         return self._tally(out)
 
+    # --------------------------------------------------------------- options
+    def options(self, origin, goal, denial=(), wez=(), handover_countries=None, cls="I"):
+        """The ways to make one move, side by side, for the planner screen:
+        {"sea": option, "air": option}. The air option flies the whole way, or,
+        when no flight reaches the far end, flies part way and goes on by sea
+        (or the reverse). Each option is {"available", "reason", "days",
+        "plan", "legs"}, and air adds "mode" and "transfer". Uses class cls's
+        rules (default I, general cargo that any aircraft may carry), by the
+        same rules as plan()."""
+        g = self.g
+        if handover_countries is None:
+            handover_countries = self.rules["handover"]["countries"]
+        out = self.plan(origin, goal, [{"class": cls}], denial, wez, handover_countries, "economic")
+        row = out["classes"][0]
+        sea = {"available": not out["blocked"], "reason": out["blocked"], "days": row["sea_days"],
+               "plan": row["plan"], "legs": out["legs"]}
+        rule = self.air_rules["classes"][cls]
+        if rule == "none":
+            return {"sea": sea, "air": {"available": False, "reason": "Class %s never flies" % cls}}
+        air = self._air_option(origin, goal, denial, wez, handover_countries, rule == "military")
+        if air["available"]:
+            air = dict(air, mode="air", transfer=None)
+        else:
+            den = g.links_in_areas(denial) if denial else frozenset()
+            closed = {"military": den, "commercial": den | (g.links_in_areas(wez) if wez else frozenset())}
+            mixed = self._mixed_option(out, cls, rule, denial, wez, handover_countries, closed, {})
+            air = dict(mixed, reason=air["reason"]) if mixed else {"available": False, "reason": air["reason"]}
+        return {"sea": sea, "air": air}
+
     # ------------------------------------------------------------------- air
     def _choose_modes(self, out, cargo, priority, denial, wez, countries, closed):
         """Economic cargo goes by sea. Urgent cargo takes the soonest of sea,

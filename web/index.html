@@ -67,6 +67,17 @@
   #tip { position: absolute; display: none; pointer-events: none; max-width: 320px; padding: 7px 10px;
          background: rgba(17,22,28,.96); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; line-height: 1.45; }
   #tip b { color: #fff; } #tip .dim { color: var(--dim); }
+  #options { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 14px; }
+  #options:empty { display: none; }
+  #options .head { grid-column: 1 / -1; font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+  .opt { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+  .opt:hover, .opt.on { border-color: var(--origin); background: #1d2833; }
+  .opt.na { cursor: default; border-style: dashed; } .opt.na:hover { border-color: var(--line); background: none; }
+  .opt .k { font-size: 12px; color: var(--dim); }
+  .opt .d { font-size: 18px; font-weight: 600; }
+  .opt .s { font-size: 12px; color: var(--dim); margin-top: 1px; }
+  .opt .chg { font-size: 12px; color: #f3b4aa; } .opt .same { font-size: 12px; color: var(--dim); }
+  body.air-view #results { opacity: .45; }
   .lbl { fill: var(--ink); paint-order: stroke; stroke: var(--bg); font-weight: 600; pointer-events: none; }
   body.cargo .routes-only, body:not(.cargo) .cargo-only { display: none; }
   .tabs, .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -155,6 +166,7 @@
     <p class="hint" id="drawHint"></p>
     <ul id="areaList"></ul>
 
+    <div class="routes-only"><div id="options"></div></div>
     <div id="msg"></div>
     <div id="summary"></div>
     <ol id="results"></ol>
@@ -215,6 +227,7 @@ let currentFrom = null, currentTo = null, last = null;
 let areas = [];           // [{kind: "denial" | "wez", type: "circle", center, radius_nm} | {kind, type: "polygon", points}]
 let mode = null, draft = null;          // drawing mode
 let appMode = "routes", drawKind = "denial", meta = null, tons = {}, prios = {}, priority = "economic", labelOf = {};
+let opts = null, routeView = "sea";     // Routes: the ways there (by sea, by air), and which one the map shows
 const denialAreas = () => areas.filter(a => a.kind !== "wez");
 const wezAreas = () => areas.filter(a => a.kind === "wez");
 
@@ -243,6 +256,7 @@ const nmBetween = (a, b) => d3.geoDistance(a, b) * NM_PER_RAD;
 function fitRoutes() {
   const feats = [];
   if (last && appMode === "cargo") for (const l of last.legs) feats.push(l.line);
+  else if (routeView === "air" && opts && opts.air.available) for (const l of opts.air.legs) feats.push(l.line);
   else if (last) {
     if (last.original) feats.push(last.original.line);
     for (const r of last.routes) feats.push(r.line);
@@ -306,6 +320,10 @@ function drawDraft() {
 function drawRoutes(highlight = null) {
   if (appMode === "cargo") return drawCargo(highlight);
   const g = el("routes"); g.innerHTML = "";
+  if (routeView === "air" && opts && opts.air.available) {
+    for (const leg of opts.air.legs) g.appendChild(legPath(leg));
+    return;
+  }
   if (!last || !last.routes) return;
   const showOriginal = denialAreas().length && last.original && (last.affected || !last.routes.length);
   if (showOriginal) {
@@ -321,6 +339,13 @@ function drawRoutes(highlight = null) {
   }
 }
 
+// One leg of a move: sea solid, air dashed, road thin; coloured by who carries it.
+const legPath = (leg, width = leg.mode === "road" ? 2 : 3.5, opacity = .95) =>
+  svgEl("path", { d: geoPath({ type: "LineString", coordinates: leg.line }), fill: "none",
+    stroke: CARRIER[leg.carrier], "stroke-width": width, "stroke-opacity": opacity,
+    "stroke-dasharray": leg.mode === "air" ? "9 6" : "none",
+    "stroke-linecap": "round", "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke" });
+
 // Cargo legs, commercial under military; a route's own legs stand out when highlighted.
 function drawCargo(route = null) {
   const g = el("routes"); g.innerHTML = "";
@@ -330,12 +355,47 @@ function drawCargo(route = null) {
     for (const leg of last.legs) {
       if (leg.carrier !== carrier) continue;
       const on = !mine || mine.has(legKey(leg));
-      const width = leg.mode === "road" ? 2 : on && mine ? 4.5 : 3.5;
-      g.appendChild(svgEl("path", { d: geoPath({ type: "LineString", coordinates: leg.line }), fill: "none",
-        stroke: CARRIER[carrier], "stroke-width": width, "stroke-opacity": on ? .95 : .12,
-        "stroke-dasharray": leg.mode === "air" ? "9 6" : "none",
-        "stroke-linecap": "round", "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke" }));
+      g.appendChild(legPath(leg, leg.mode === "road" ? 2 : on && mine ? 4.5 : 3.5, on ? .95 : .12));
     }
+  }
+}
+
+// ------------------------------------------------------------ ways there
+// Planner screen, step 1: by sea and by air side by side for this move, days door to door.
+const OPT_TITLE = {
+  sea: "Door to door: sailing at 18 knots, plus a day in each port where cargo is worked. Illustrative allowances, not planning factors. Click to show the sea routes.",
+  air: "Door to door: the road to and from each airport, flying at cruise speed with any refuelling stops, and 4 hours at each airport. Illustrative allowances, not planning factors. Click to show it on the map.",
+};
+
+function renderOptions() {
+  const box = el("options"); box.innerHTML = "";
+  document.body.classList.toggle("air-view", routeView === "air" && appMode !== "cargo");
+  if (!opts || appMode === "cargo") return;
+  box.innerHTML = `<div class="head">Ways there, door to door</div>`;
+  for (const kind of ["sea", "air"]) {
+    const o = opts[kind], before = opts.before && opts.before[kind];
+    const label = kind === "sea" ? "By sea" : o.mode === "air_sea" ? "By air, then sea"
+                : o.mode === "sea_air" ? "By sea, then air" : "By air";
+    const card = document.createElement("div");
+    card.className = "opt" + (o.available ? (routeView === kind ? " on" : "") : " na");
+    card.title = OPT_TITLE[kind];
+    if (!o.available) {
+      card.innerHTML = `<div class="k">${label}</div><div class="d">No route</div><div class="s">${esc(o.reason || "")}</div>`;
+    } else {
+      const moved = o.legs.filter(l => l.mode === kind), stops = moved.reduce((n, l) => n + (l.stops || []).length, 0);
+      const how = o.transfer ? `changes ${o.mode === "air_sea" ? "to sea" : "to air"} at ${esc(o.transfer.name)}`
+                : `${fmt(moved.reduce((n, l) => n + l.length_nm, 0))} nm` +
+                  (kind === "air" ? (stops ? `, ${stops} refuelling stop${stops === 1 ? "" : "s"}` : ", nonstop") : "");
+      let change = "";
+      if (before && before.available) {
+        const d = Math.round((o.days - before.days) * 10) / 10;
+        change = d ? `<div class="chg">${d > 0 ? "+" : ""}${fmt(d, 1)} days from the areas</div>`
+                   : `<div class="same">No change from the areas</div>`;
+      }
+      card.innerHTML = `<div class="k">${label}</div><div class="d">${fmt(o.days, 1)} days</div><div class="s">${how}</div>${change}`;
+      card.onclick = () => { if (routeView !== kind) { routeView = kind; renderOptions(); drawRoutes(); fitRoutes(); } };
+    }
+    box.appendChild(card);
   }
 }
 
@@ -551,9 +611,17 @@ async function go(fit = false) {
   }
   msg.className = ""; msg.textContent = cargoMode ? "Planning..." : "Routing...";
   const ticket = ++pending;
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const data = await res.json();
+  const post = (u, b) => fetch(u, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) })
+    .then(r => r.json());
+  // Routes also asks for the ways there (by sea, by air) for the same move, alongside the sea routes.
+  const ways = cargoMode ? null
+    : post("/api/options", { from: currentFrom, to: currentTo, areas: plain(denialAreas()) }).catch(() => null);
+  const data = await post(url, body);
+  const o = ways && await ways;
   if (ticket !== pending || cargoMode !== (appMode === "cargo")) return;   // a newer request has been sent since
+  opts = o && !o.error && !data.error ? o : null;
+  if (!opts || !opts.air.available) routeView = "sea";
+  renderOptions();
   if (data.error) { msg.className = "err"; msg.textContent = data.error; last = null; renderResults(); drawRoutes(); drawMarks(); return; }
   last = data;
   if (cargoMode) {
@@ -598,7 +666,7 @@ function setAppMode(m) {
   el("modeRoutes").classList.toggle("on", m === "routes");
   el("modeCargo").classList.toggle("on", m === "cargo");
   el("go").textContent = m === "cargo" ? "Plan cargo" : "Find routes";
-  last = null; setMode(null); renderResults(); drawRoutes(); drawMarks();
+  last = null; opts = null; routeView = "sea"; setMode(null); renderResults(); renderOptions(); drawRoutes(); drawMarks();
   go(true);
 }
 

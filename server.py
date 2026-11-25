@@ -145,6 +145,24 @@ def _priority(v):
     return v
 
 
+def find_options(body):
+    """The ways to make one move side by side (planner screen, step 1): by sea and
+    by air, days door to door. With areas drawn, "before" holds the same options
+    with no areas, so the screen can show the days each area adds."""
+    origin, goal = body.get("from"), body.get("to")
+    if origin not in GRAPH.ports or goal not in GRAPH.ports:
+        raise BadRequest("Unknown origin or destination port.")
+    if origin == goal:
+        raise BadRequest("Origin and destination are the same port.")
+    denial, wez = parse_areas(body.get("areas")), parse_areas(body.get("wez"))
+    started = time.perf_counter()
+    with LOCK:
+        out = PLANNER.options(origin, goal, denial, wez)
+        out["before"] = PLANNER.options(origin, goal) if denial or wez else None
+    out["ms"] = round((time.perf_counter() - started) * 1000)
+    return out
+
+
 def find_cargo(body):
     origin, goal = body.get("from"), body.get("to")
     if origin not in GRAPH.ports or goal not in GRAPH.ports:
@@ -256,7 +274,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, "not found", "text/plain")
 
     def do_POST(self):
-        handler = {"/api/routes": find_routes, "/api/cargo": find_cargo}.get(urllib.parse.urlparse(self.path).path)
+        handler = {"/api/routes": find_routes, "/api/cargo": find_cargo, "/api/options": find_options}.get(urllib.parse.urlparse(self.path).path)
         if handler is None:
             return self.send(404, "not found", "text/plain")
         try:
