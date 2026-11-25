@@ -229,11 +229,22 @@ def find_compare(body):
     countries = parse_countries(body)
     known = comparisons.LIFT.counts()
 
+    def count_ok(v):
+        return isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 1000
+
+    def group_ok(k, g):
+        """{"count", "at", "ready"}: at is a port id for ships, an airfield id for aircraft, or None (the origin)."""
+        at, ready = g.get("at"), g.get("ready", 0)
+        places = GRAPH.ports if k in comparisons.LIFT.ships else PLANNER.air.fields
+        return (isinstance(g, dict) and count_ok(g.get("count")) and (at is None or at in places)
+                and isinstance(ready, (int, float)) and not isinstance(ready, bool) and 0 <= ready <= 90)
+
     def parse_lift(lift):
         if lift is not None and not (isinstance(lift, dict) and all(
-                k in known and isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 1000
+                k in known and (count_ok(v) or isinstance(v, list) and 1 <= len(v) <= 20 and all(group_ok(k, g) for g in v))
                 for k, v in lift.items())):
-            raise BadRequest("lift must be {type: count}, counts 0 to 1,000, types: " + ", ".join(known) + ".")
+            raise BadRequest("lift must be {type: count} or {type: [{\"count\", \"at\", \"ready\"}]}, counts 0 to "
+                             "1,000, ready 0 to 90 days, types: " + ", ".join(known) + ".")
         return lift
 
     lift = parse_lift(body.get("lift"))

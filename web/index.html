@@ -133,6 +133,13 @@
   .stepper button { width: 26px; padding: 2px 0; font-size: 14px; }
   .stepper input { width: 52px; padding: 3px 4px; text-align: center; }
   .lt .use { font-size: 11.5px; color: var(--dim); margin-top: 3px; }
+  .grp { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 5px; align-items: center; margin-top: 5px; }
+  .grp input.at { padding: 3px 6px; font-size: 12px; }
+  .grp .rd { display: flex; align-items: center; gap: 3px; font-size: 12px; color: var(--dim); }
+  .grp .rd input { width: 44px; padding: 3px 4px; text-align: center; font-size: 12px; }
+  .grp .rm { width: auto; padding: 0 6px; border: none; background: none; color: var(--dim); font-size: 15px; }
+  .grp .stepper input { width: 40px; }
+  .addgrp { width: auto; margin-top: 6px; padding: 2px 8px; font-size: 11.5px; font-weight: 500; color: var(--dim); border-style: dashed; }
   .lt .use b { color: var(--ink); font-weight: 600; }
   .liftline { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--dim); }
   .liftline span { flex: 1; }
@@ -246,7 +253,8 @@
   </aside>
   <aside id="liftDrawer" class="cargo-only" aria-label="Lift on hand">
     <div class="top" style="justify-content:space-between"><span id="liftHead">Lift on hand</span><button id="closeLift" class="mini">Done</button></div>
-    <p class="hint">Ships and aircraft on hand for this turn, at the origin and ready on D+0. Change a count to see which classes slip; losing a ship can be a turn of its own. Figures are illustrative, in cargo/lift_rules.json.</p>
+    <p class="hint">Ships and aircraft on hand for this turn, in groups. Each group starts at the origin unless you name a port (ships) or an airport (aircraft), and is free to move from its ready day. Time to reach the loading point counts. Change a count or a place to see which classes slip; each can be a turn of its own. Figures are illustrative, in cargo/lift_rules.json.</p>
+    <datalist id="portNames"></datalist><datalist id="fieldNames"></datalist>
     <div class="sec first">Ships</div><div id="liftShips"></div>
     <div class="sec">Aircraft</div><div id="liftAir"></div>
     <button id="resetLift" style="margin-top:10px">Reset to the starting set</button>
@@ -531,6 +539,24 @@ function drawMarks() {
                                      stroke: "var(--bg)", "stroke-width": 2, "vector-effect": "non-scaling-stroke" }));
       const t = svgEl("text", { x: x + 10 * s, y: y + 4 * s, class: "lbl", "font-size": 12 * s, "stroke-width": 3 * s });
       t.textContent = p.name.replace(/ \([A-Z0-9]+\)$/, "");
+      g.appendChild(t);
+    }
+  }
+  if (appMode === "cargo" && meta) {
+    // Lift that starts away from the origin: a square at its port or airport, with its count and ready day.
+    const at = {};
+    for (const [k, x] of liftTypes()) for (const g of liftGroups(turns[cur], k)) {
+      if (!g.at || !g.count) continue;
+      const p = k in meta.lift.ships ? byId[g.at] : fieldById[g.at];
+      if (!p) continue;
+      (at[g.at] = at[g.at] || { p, text: [] }).text.push(`${g.count} ${shortName(x.name)}${g.ready ? ` D+${fmt(g.ready, g.ready % 1 ? 1 : 0)}` : ""}`);
+    }
+    for (const { p, text } of Object.values(at)) {
+      const [x, y] = projection([p.lon, p.lat]), r = 5 * s;
+      g.appendChild(svgEl("rect", { x: x - r, y: y - r, width: 2 * r, height: 2 * r, fill: "var(--military)",
+                                    stroke: "var(--bg)", "stroke-width": 2, "vector-effect": "non-scaling-stroke" }));
+      const t = svgEl("text", { x: x + 9 * s, y: y + 4 * s, class: "lbl", "font-size": 12 * s, "stroke-width": 3 * s });
+      t.textContent = `${p.name}: ${text.join(", ")}`;
       g.appendChild(t);
     }
   }
@@ -922,8 +948,11 @@ function situation(t) {
   if (!parts.length) parts.push("no areas");
   // Lift that differs from the starting set: "-1 tanker", "+4 C-17".
   for (const [k, x] of liftTypes()) {
-    const n = t.lift[k] ?? x.count;
+    const n = liftCount(t, k);
     if (n !== x.count) parts.push(`${n > x.count ? "+" : ""}${n - x.count} ${shortName(x.name)}`);
+    for (const g of liftGroups(t, k)) {
+      if (g.count && (g.at || g.ready)) parts.push(`${g.count} ${shortName(x.name)} ${g.at ? "at " + placeName(k, g.at) : "at the origin"}${g.ready ? `, D+${fmt(g.ready, g.ready % 1 ? 1 : 0)}` : ""}`);
+    }
   }
   return parts.join(", ");
 }
@@ -932,8 +961,12 @@ function situation(t) {
 // Each turn holds its own lift counts ({type: count}, only those changed from the starting set).
 const liftTypes = () => meta ? [...Object.entries(meta.lift.ships), ...Object.entries(meta.lift.aircraft)] : [];
 const shortName = name => { const m = name.match(/\((.*) class\)$/); return m ? m[1] : name.replace(/ \(.*\)$/, "").toLowerCase(); };
-const liftCount = (t, k) => t.lift[k] ?? Object.fromEntries(liftTypes())[k].count;
-const liftBody = t => Object.fromEntries(liftTypes().map(([k]) => [k, liftCount(t, k)]));
+// A type's lift in a turn: absent means the starting set (one group at the origin, ready on D+0).
+const liftGroups = (t, k) => t.lift[k] || [{ count: Object.fromEntries(liftTypes())[k].count, at: null, ready: 0 }];
+const liftCount = (t, k) => liftGroups(t, k).reduce((n, g) => n + g.count, 0);
+const liftBody = t => Object.fromEntries(liftTypes().map(([k]) => [k, liftGroups(t, k)]));
+const placeName = (k, id) => !id ? "the origin" : k in meta.lift.ships ? byId[id].name : (fieldById[id] || {}).name || id;
+let fieldById = {}, fieldByLabel = {}, fieldLabel = {};
 
 function renderLiftLine() {
   const t = turns[cur];
@@ -963,19 +996,45 @@ function renderLift() {
   for (const [box, group] of [["liftShips", meta.lift.ships], ["liftAir", meta.lift.aircraft]]) {
     el(box).innerHTML = "";
     for (const [k, x] of Object.entries(group)) {
-      const n = liftCount(t, k), div = document.createElement("div");
-      div.className = "lt" + (n !== x.count ? " changed" : "");
+      const n = liftCount(t, k), groups = liftGroups(t, k), div = document.createElement("div");
+      const moved = groups.length > 1 || groups.some(g => g.at || g.ready);
+      div.className = "lt" + (n !== x.count || moved ? " changed" : "");
       const info = x.capacity_st != null ? `${fmt(x.capacity_st)} short tons a load · carries ${x.classes.join(", ")}`
                                          : `${fmt(x.planning_payload_st)} short tons a sortie · ${fmt(x.ground_hours, 2)} h on the ground`;
-      div.innerHTML = `<div class="top"><span>${esc(x.name)}</span><span class="stepper">` +
-        `<button aria-label="One fewer">−</button><input type="number" min="0" max="1000" step="1" value="${n}" aria-label="${esc(x.name)} on hand">` +
-        `<button aria-label="One more">+</button></span></div><div class="via">${info}${n !== x.count ? ` · starting set ${x.count}` : ""}</div>` +
-        `<div class="use">${liftUse(k)}</div>`;
-      const [minus, input, plus] = div.querySelectorAll(".stepper > *");
-      const set = v => { v = Math.max(0, Math.min(1000, Math.round(v) || 0)); if (v === x.count) delete t.lift[k]; else t.lift[k] = v; liftChanged(); };
-      minus.onclick = () => set(liftCount(t, k) - 1);
-      plus.onclick = () => set(liftCount(t, k) + 1);
-      input.onchange = () => set(+input.value);
+      const list = k in meta.lift.ships ? "portNames" : "fieldNames", label = id => id ? (k in meta.lift.ships ? labelOf[id] : fieldLabel[id]) : "";
+      div.innerHTML = `<div class="top"><span>${esc(x.name)}</span><span>${n} on hand</span></div>` +
+        `<div class="via">${info}${n !== x.count ? ` · starting set ${x.count}` : ""}</div>` +
+        groups.map((g, i) => `<div class="grp" data-i="${i}"><span class="stepper"><button aria-label="One fewer">−</button>` +
+          `<input type="number" class="n" min="0" max="1000" step="1" value="${g.count}" aria-label="How many in this group"><button aria-label="One more">+</button></span>` +
+          `<input class="at" list="${list}" value="${esc(label(g.at))}" placeholder="at the origin" aria-label="Where this group starts" spellcheck="false">` +
+          `<span class="rd" title="The day this group is free to move">D+<input type="number" class="ready" min="0" max="90" step="0.5" value="${g.ready}" aria-label="Ready day"></span>` +
+          (groups.length > 1 ? `<button class="rm" title="Remove this group" aria-label="Remove this group">×</button>` : "<span></span>") + `</div>`).join("") +
+        `<button class="addgrp">+ Add a group</button><div class="use">${liftUse(k)}</div>`;
+      // Any change stores this type's groups in the turn; back to the starting set when they match it again.
+      const save = gs => {
+        const same = gs.length === 1 && !gs[0].at && !gs[0].ready && gs[0].count === x.count;
+        if (same) delete t.lift[k]; else t.lift[k] = gs;
+        liftChanged(); renderLift();
+      };
+      const copy = () => liftGroups(t, k).map(g => ({ ...g }));
+      div.querySelectorAll(".grp").forEach(row => {
+        const i = +row.dataset.i, [minus, input, plus] = row.querySelectorAll(".stepper > *");
+        const setN = v => { const gs = copy(); gs[i].count = Math.max(0, Math.min(1000, Math.round(v) || 0)); save(gs); };
+        minus.onclick = () => setN(groups[i].count - 1);
+        plus.onclick = () => setN(groups[i].count + 1);
+        input.onchange = () => setN(+input.value);
+        const at = row.querySelector(".at");
+        at.onchange = () => {
+          const v = at.value.trim(), id = !v ? null : k in meta.lift.ships ? byLabel[v] : fieldByLabel[v];
+          if (v && !id) { at.setCustomValidity("Pick a place from the list"); at.reportValidity(); return; }
+          at.setCustomValidity(""); const gs = copy(); gs[i].at = id; save(gs);
+        };
+        const rd = row.querySelector(".ready");
+        rd.onchange = () => { const gs = copy(); gs[i].ready = Math.max(0, Math.min(90, +rd.value || 0)); save(gs); };
+        const rm = row.querySelector(".rm");
+        if (rm) rm.onclick = () => { const gs = copy(); gs.splice(i, 1); save(gs); };
+      });
+      div.querySelector(".addgrp").onclick = () => { const gs = copy(); gs.push({ count: 1, at: null, ready: 0 }); save(gs); };
       el(box).appendChild(div);
     }
   }
@@ -983,7 +1042,7 @@ function renderLift() {
 
 let liftTimer = null;
 function liftChanged() {
-  renderTurns();
+  renderTurns(); drawMarks();
   clearTimeout(liftTimer); liftTimer = setTimeout(go, 250);
 }
 
@@ -1252,6 +1311,12 @@ async function boot() {
     el("classes").appendChild(row);
   }
   showTons();
+  for (const f of airfields) {
+    const lab = `${f.name}${f.code ? ` (${f.code})` : ""}, ${f.country}`;
+    fieldById[f.id] = f; fieldByLabel[lab] = f.id; fieldLabel[f.id] = lab;
+  }
+  el("portNames").innerHTML = Object.keys(byLabel).map(l => `<option value="${esc(l)}">`).join("");
+  el("fieldNames").innerHTML = Object.keys(fieldByLabel).map(l => `<option value="${esc(l)}">`).join("");
   el("editLift").onclick = () => openLift(true);
   el("closeLift").onclick = () => openLift(false);
   el("resetLift").onclick = () => { turns[cur].lift = {}; liftChanged(); };

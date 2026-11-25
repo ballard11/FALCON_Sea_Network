@@ -1,9 +1,10 @@
 {
   "_note": "Lift and throughput for closure (when the last ton arrives); see lift.py and the Lift layer spec in the Program Hub. Every figure is marked: 'illustrative' means chosen by Claude for the demo, not a planning factor. Change a figure here and nothing else: no code change is needed. Stage 1: the starting set sits at the origin, ready on D+0.",
   "ships": {
-    "_note": "Capacity in short tons only; deck area is not modelled (decided 25 Nov 2026). Sailing time is the route's, at the carrier speed in movement_rules.json; the ship type sets only how much one load carries.",
+    "_note": "Capacity in short tons only; deck area is not modelled (decided 25 Nov 2026). Sailing time is the route's, at the carrier speed in movement_rules.json; the ship type sets only how much one load carries. carrier is who sails it (movement_rules.json): commercial carriers keep out of a WEZ when sailing to the loading port.",
     "cargo": {
       "name": "Commercial cargo ship",
+      "carrier": "commercial",
       "classes": ["I", "II", "IV", "V", "VI", "VIII", "IX"],
       "capacity_st": 10000,
       "count": 2,
@@ -11,6 +12,7 @@
     },
     "sealift": {
       "name": "Military sealift ship (LMSR class)",
+      "carrier": "military",
       "classes": ["VII"],
       "capacity_st": 12000,
       "count": 1,
@@ -21,6 +23,7 @@
     },
     "tanker": {
       "name": "Tanker",
+      "carrier": "commercial",
       "classes": ["III"],
       "capacity_st": 30000,
       "count": 1,

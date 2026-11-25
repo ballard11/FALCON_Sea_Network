@@ -104,8 +104,11 @@ def _row(P, item, cells):
 
 def _close(P, s, rows, legs):
     """Closure for every cell: everything by sea, and everything by air, each pooled."""
+    g = P.g
+    dc = g.links_in_areas(s["denial"]) if s["denial"] else frozenset()
+    closed = {"military": dc, "commercial": dc | (g.links_in_areas(s["wez"]) if s["wez"] else frozenset())}
     LIFT.close(P, {"sea": [(i["class"], i.get("short_tons"), sea) for i, sea, _ in rows],
-                   "air": [(i["class"], i.get("short_tons"), air) for i, _, air in rows]}, legs, s.get("lift"))
+                   "air": [(i["class"], i.get("short_tons"), air) for i, _, air in rows]}, legs, s.get("lift"), closed)
 
 
 def by_mode(P, s):
