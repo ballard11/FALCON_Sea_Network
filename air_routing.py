@@ -14,6 +14,7 @@ arrive soonest: each stop costs `stop_hours` on the ground. Airfields come
 from neo4j-datamodel/nodes/airfields.csv (OurAirports; paved runways of
 8,000 ft or more).
 """
+import bisect
 import csv
 import heapq
 import math
@@ -68,6 +69,11 @@ class AirNetwork:
         self.fields = {r["airfield_id"]: r for r in rows}
         self.coords = {k: (float(r["lon"]), float(r["lat"])) for k, r in self.fields.items()}
         self.runway = {k: float(r["longest_paved_runway_ft"] or 0) for k, r in self.fields.items()}
+        # Airfields sorted by latitude, so nearest() only measures those within reach of a point's
+        # latitude; _order keeps the file order, which breaks ties as before.
+        self._by_lat = sorted(self.coords, key=lambda f: self.coords[f][1])
+        self._lats = [self.coords[f][1] for f in self._by_lat]
+        self._order = {f: i for i, f in enumerate(self.coords)}
 
     @classmethod
     def load(cls, path=AIRFIELDS):
@@ -82,16 +88,24 @@ class AirNetwork:
     def inside(self, fid, areas):
         return any(a.contains(self.coords[fid]) for a in areas)
 
-    def nearest(self, point, min_runway_ft, max_nm, avoid=()):
+    def nearest(self, point, min_runway_ft, max_nm, avoid=(), ok=None):
         """The nearest airfield to point with a long enough runway, outside
-        the areas in avoid, no more than max_nm away: (id, nm) or (None, None)."""
+        the areas in avoid, no more than max_nm away: (id, nm) or (None, None).
+        ok, if given, is a further test an airfield must pass, such as a road
+        to it that keeps out of the areas."""
+        band = max_nm / 60.0          # a degree of latitude is a little over 60 nm, so none is missed
+        lo = bisect.bisect_left(self._lats, point[1] - band)
+        hi = bisect.bisect_right(self._lats, point[1] + band)
         best = None
-        for fid, c in self.coords.items():
+        for fid in self._by_lat[lo:hi]:
             if self.runway[fid] < min_runway_ft:
                 continue
-            d = great_circle_nm(point, c)
-            if d <= max_nm and (best is None or d < best[1]) and not self.inside(fid, avoid):
-                best = (fid, d)
+            d = great_circle_nm(point, self.coords[fid])
+            if d > max_nm or (best is not None and (d > best[1] or (d == best[1] and self._order[fid] > self._order[best[0]]))):
+                continue
+            if self.inside(fid, avoid) or (ok is not None and not ok(fid)):
+                continue
+            best = (fid, d)
         return best or (None, None)
 
     def fly(self, a, b, plane, closed=(), stop_ok=lambda fid: True, stop_hours=0.0):

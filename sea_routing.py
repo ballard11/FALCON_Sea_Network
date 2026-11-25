@@ -126,9 +126,12 @@ class DenialArea:
         if self.contains(p) or self.contains(q):
             return True
         if self.kind == "circle":
+            # q is unwrapped against p, not the centre: a piece straddling the meridian opposite
+            # the centre would otherwise run from +180 to -180 and seem to pass through it.
             kx = math.cos(math.radians(self.c[1])) * 60
-            ax, ay = (_unwrap(p[0], self.c[0]) - self.c[0]) * kx, (p[1] - self.c[1]) * 60
-            bx, by = (_unwrap(q[0], self.c[0]) - self.c[0]) * kx, (q[1] - self.c[1]) * 60
+            px = _unwrap(p[0], self.c[0])
+            ax, ay = (px - self.c[0]) * kx, (p[1] - self.c[1]) * 60
+            bx, by = (_unwrap(q[0], px) - self.c[0]) * kx, (q[1] - self.c[1]) * 60
             dx, dy = bx - ax, by - ay
             den = dx * dx + dy * dy
             t = 0.0 if den == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / den))

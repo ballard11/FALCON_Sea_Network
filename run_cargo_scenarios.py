@@ -229,7 +229,8 @@ def invariant_checks(plan, denial, wez, countries):
     for x in legs.values():
         ends = max(ends, great_circle_nm(x["line"][0], coords(x["from"])),
                    great_circle_nm(x["line"][-1], coords(x["to"])))
-        worst = max(worst, abs(routes.line_nm(x["line"]) - x["length_nm"]) / max(x["length_nm"], 1.0))
+        # Lengths are reported to 0.1 nm, so half of that is rounding, not a mismatch (it matters on short road legs).
+        worst = max(worst, max(0.0, abs(routes.line_nm(x["line"]) - x["length_nm"]) - 0.05) / max(x["length_nm"], 1.0))
         if x["length_nm"] < great_circle_nm(coords(x["from"]), coords(x["to"])) - 0.5:
             short.append("%s to %s" % (x["from_name"], x["to_name"]))
     out.append(check("Every leg starts and ends at its ports or airfields", "within %g nm" % routes.END_TOLERANCE_NM,

@@ -316,17 +316,10 @@ class CargoPlanner:
         row = out["classes"][0]
         sea = {"available": not out["blocked"], "reason": out["blocked"], "days": row["sea_days"],
                "plan": row["plan"], "legs": out["legs"]}
-        rule = self.air_rules["classes"][cls]
-        if rule == "none":
-            return {"sea": sea, "air": {"available": False, "reason": "Class %s never flies" % cls}}
-        air = self._air_option(origin, goal, denial, wez, handover_countries, rule == "military")
-        if air["available"]:
-            air = dict(air, mode="air", transfer=None)
-        else:
-            den = g.links_in_areas(denial) if denial else frozenset()
-            closed = {"military": den, "commercial": den | (g.links_in_areas(wez) if wez else frozenset())}
-            mixed = self._mixed_option(out, cls, rule, denial, wez, handover_countries, closed, {})
-            air = dict(mixed, reason=air["reason"]) if mixed else {"available": False, "reason": air["reason"]}
+        den = g.links_in_areas(denial) if denial else frozenset()
+        closed = {"military": den, "commercial": den | (g.links_in_areas(wez) if wez else frozenset())}
+        opt, reason = self.air_way(out, cls, denial, wez, handover_countries, closed, {}, {})
+        air = dict(opt, reason=reason) if opt else {"available": False, "reason": reason}
         return {"sea": sea, "air": air}
 
     # ------------------------------------------------------------------- air
@@ -348,21 +341,13 @@ class CargoPlanner:
                                       % (c["class"], "it has no way there" if blocked else
                                          "it goes by sea: %s days" % format(c["days"], ".1f"))})
                 continue
-            if rule not in direct:
-                direct[rule] = self._air_option(out["origin"], out["goal"], denial, wez, countries, rule == "military")
-            air = direct[rule]
-            if air["available"]:
-                c["air_days"] = air["days"]
-                opt = air
-            else:
-                opt = self._mixed_option(out, c["class"], rule, denial, wez, countries, closed, cache)
-                if opt:
-                    opt = dict(opt, why=air["reason"])
-                    c["air_days"] = opt["days"]
+            opt, reason = self.air_way(out, c["class"], denial, wez, countries, closed, direct, cache)
+            if opt:
+                c["air_days"] = opt["days"]
             if opt is None:
                 c["flags"].insert(0, {"level": "bottleneck", "code": "no_air", "text":
                                       "Urgent cargo of Class %s cannot fly: %s. %s." % (
-                                          c["class"], air["reason"],
+                                          c["class"], reason,
                                           "It has no way there" if blocked else
                                           "It goes by sea: %s days" % format(c["days"], ".1f"))})
             elif not blocked and opt["days"] >= c["days"]:
@@ -371,6 +356,22 @@ class CargoPlanner:
                                       % (c["class"], format(c["days"], ".1f"), format(opt["days"], ".1f"))})
             else:
                 self._fly(out, c, item, opt, sea_text)
+
+    def air_way(self, out, cid, denial, wez, countries, closed, direct, cache):
+        """Class cid's way by air for the move in out (a plan() result): the direct
+        flight, or, when no flight reaches the far end, air then sea (or sea then air).
+        Returns (option or None, why the direct flight fails or None). direct and cache
+        are dicts kept between classes of one move, so each flight is worked out once."""
+        rule = self.air_rules["classes"][cid]
+        if rule == "none":
+            return None, "Class %s never flies" % cid
+        if rule not in direct:
+            direct[rule] = self._air_option(out["origin"], out["goal"], denial, wez, countries, rule == "military")
+        air = direct[rule]
+        if air["available"]:
+            return dict(air, mode="air", transfer=None), None
+        opt = self._mixed_option(out, cid, rule, denial, wez, countries, closed, cache)
+        return (dict(opt, why=air["reason"]) if opt else None), air["reason"]
 
     def _fly(self, out, c, item, opt, sea_text):
         """Turn class row c into its air plan, or its air-then-sea plan."""
@@ -474,6 +475,11 @@ class CargoPlanner:
         rules as at sea: commercial aircraft stay out of a WEZ, and hand over
         to military airlift at the airfield outside it nearest the end inside
         it. {"available", "reason", "plan", "legs", "handover", "days"}"""
+        # A port inside an area of denial is closed to every mode: no flying to an airfield
+        # outside the area and going in by road.
+        for role, pid in (("origin", origin), ("destination", goal)):
+            if self.g.port_in_areas(pid, denial):
+                return {"available": False, "reason": "the %s port %s is inside an area of denial" % (role, self._name(pid))}
         air, ar = self.air, self.air_rules
         hd, fields, planes = ar["handling"], ar["airfields"], ar["aircraft"]
         stops = set(fields["stop_countries"])
@@ -483,8 +489,16 @@ class CargoPlanner:
             return air.fly(a, b, planes[carrier], closed, lambda f: air.fields[f]["country_code"] in stops,
                            hd["refuel_stop_hours"])
 
+        def road_clear(port, field, areas):
+            """The road leg is a straight line; it may not pass through an area either."""
+            if not areas:
+                return True
+            pts = densify([self.g.coords[port], air.coords[field]], 2.0)
+            return not any(a.crosses(p, q) for a in areas for p, q in zip(pts, pts[1:]))
+
         def end(port, carrier, avoid):
-            return air.nearest(self.g.coords[port], planes[carrier]["min_runway_ft"], fields["max_road_nm"], avoid)[0]
+            return air.nearest(self.g.coords[port], planes[carrier]["min_runway_ft"], fields["max_road_nm"], avoid,
+                               ok=lambda f: road_clear(port, f, avoid))[0]
 
         def hours(path, carrier):
             nm = sum(great_circle_nm(air.coords[a], air.coords[b]) for a, b in zip(path, path[1:]))
@@ -493,7 +507,8 @@ class CargoPlanner:
         om, gm = end(origin, "military", denial), end(goal, "military", denial)
         if om is None or gm is None:
             return {"available": False, "reason": "no airfield with a long enough runway%s is within %d nm of %s"
-                    % (" outside the areas of denial" if denial else "", fields["max_road_nm"],
+                    % (", reached by a road that keeps out of the areas of denial," if denial else "",
+                       fields["max_road_nm"],
                        self._name(origin if om is None else goal))}
         whole = fly(om, gm, "military", denial)
         if not military_only:

@@ -16,6 +16,9 @@ Python 3, stdlib only. All routing lives in sea_routing.py.
                                "cargo": [{"class": "I", "short_tons": 500}, ...], "priority": "urgent"}
                               areas of denial close the water to everyone, a WEZ to
                               commercial carriers only; see cargo_movement.py
+    POST /api/compare         {"from", "to", "cargo", "areas", "wez", "lens": "mode" | "pod",
+                               "base": {"areas": [...], "wez": [...]}}   the planner screen's grid,
+                              for this situation and the baseline's; see comparisons.py
 """
 import csv
 import glob
@@ -27,6 +30,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import comparisons
 from cargo_movement import CargoPlanner
 from sea_routing import DenialArea, SeaGraph
 
@@ -164,13 +168,7 @@ def find_options(body):
     return out
 
 
-def find_cargo(body):
-    origin, goal = body.get("from"), body.get("to")
-    if origin not in GRAPH.ports or goal not in GRAPH.ports:
-        raise BadRequest("Unknown origin or destination port.")
-    if origin == goal:
-        raise BadRequest("Origin and destination are the same port.")
-    denial, wez = parse_areas(body.get("areas")), parse_areas(body.get("wez"))
+def parse_cargo(body):
     cargo = body.get("cargo")
     if cargo is not None:
         if not isinstance(cargo, list) or not 1 <= len(cargo) <= 20:
@@ -183,16 +181,72 @@ def find_cargo(body):
                 raise BadRequest("short_tons must be a number from 0 to 10,000,000.")
             _priority(item.get("priority"))
         cargo = [{k: i[k] for k in ("class", "short_tons", "priority") if i.get(k) is not None} for i in cargo]
+    return cargo
+
+
+def parse_countries(body):
     countries = body.get("handover_countries")
     if countries is not None and not (isinstance(countries, list) and len(countries) <= 100
                                       and all(isinstance(c, str) for c in countries)):
         raise BadRequest("handover_countries must be a list of country names.")
+    return countries
+
+
+def parse_move(body):
+    origin, goal = body.get("from"), body.get("to")
+    if origin not in GRAPH.ports or goal not in GRAPH.ports:
+        raise BadRequest("Unknown origin or destination port.")
+    if origin == goal:
+        raise BadRequest("Origin and destination are the same port.")
+    return origin, goal
+
+
+def find_cargo(body):
+    origin, goal = parse_move(body)
+    denial, wez = parse_areas(body.get("areas")), parse_areas(body.get("wez"))
+    cargo, countries = parse_cargo(body), parse_countries(body)
     priority = _priority(body.get("priority")) or "economic"
     started = time.perf_counter()
     with LOCK:
         plan = PLANNER.plan(origin, goal, cargo, denial, wez, countries, priority)
     plan["ms"] = round((time.perf_counter() - started) * 1000)
     return plan
+
+
+COMPARED = {}                 # recent comparisons, so a turn's baseline isn't worked out again each time
+MAX_COMPARED = 64
+
+
+def find_compare(body):
+    """One lens over one move (planner screen, step 2), for the situation in
+    "areas" and "wez" and, when "base" ({"areas", "wez"}) is given, for the
+    baseline situation too. See comparisons.py."""
+    origin, goal = parse_move(body)
+    lens = body.get("lens", "mode")
+    if lens not in comparisons.LENSES:
+        raise BadRequest("lens must be one of: " + ", ".join(comparisons.LENSES) + ".")
+    cargo = parse_cargo(body) or PLANNER.default_cargo()
+    countries = parse_countries(body)
+    base = body.get("base")
+    if base is not None and not isinstance(base, dict):
+        raise BadRequest("base must be {\"areas\": [...], \"wez\": [...]}.")
+
+    def run(raw_areas, raw_wez):
+        key = json.dumps([lens, origin, goal, cargo, countries, raw_areas or [], raw_wez or []], sort_keys=True)
+        s = {"origin": origin, "goal": goal, "cargo": cargo, "countries": countries,
+             "denial": parse_areas(raw_areas), "wez": parse_areas(raw_wez)}
+        with LOCK:
+            if key not in COMPARED:
+                if len(COMPARED) >= MAX_COMPARED:
+                    COMPARED.pop(next(iter(COMPARED)))
+                COMPARED[key] = comparisons.compare(PLANNER, lens, s)
+            return COMPARED[key]
+
+    started = time.perf_counter()
+    out = dict(run(body.get("areas"), body.get("wez")))
+    out["base"] = run(base.get("areas"), base.get("wez")) if base is not None else None
+    out["ms"] = round((time.perf_counter() - started) * 1000)
+    return out
 
 
 def cargo_scenarios():
@@ -229,6 +283,10 @@ CARGO_META = {
     "window_nm": PLANNER.rules["handover"]["window_nm"],
     "flies": {cid: v for cid, v in PLANNER.air_rules["classes"].items() if not cid.startswith("_")},
     "aircraft": {k: v["name"] for k, v in PLANNER.air_rules["aircraft"].items() if not k.startswith("_")},
+    "payload_st": {k: v["payload_st"] for k, v in PLANNER.air_rules["aircraft"].items() if not k.startswith("_")},
+    "knots": {k: v["knots"] for k, v in PLANNER.rules["carriers"].items() if not k.startswith("_")},
+    "handling": {k: v for k, v in PLANNER.air_rules["handling"].items() if not k.startswith("_")},
+    "lenses": [{"id": k, "label": v["label"], "note": v["note"]} for k, v in comparisons.LENSES.items()],
     "scenarios": cargo_scenarios(),
 }
 
@@ -275,7 +333,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, "not found", "text/plain")
 
     def do_POST(self):
-        handler = {"/api/routes": find_routes, "/api/cargo": find_cargo, "/api/options": find_options}.get(urllib.parse.urlparse(self.path).path)
+        handler = {"/api/routes": find_routes, "/api/cargo": find_cargo, "/api/options": find_options,
+                   "/api/compare": find_compare}.get(urllib.parse.urlparse(self.path).path)
         if handler is None:
             return self.send(404, "not found", "text/plain")
         try:
