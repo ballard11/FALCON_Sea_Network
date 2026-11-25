@@ -47,7 +47,8 @@ with open(os.path.join(HERE, "neo4j-datamodel", "nodes", "passages.csv"), encodi
     PASSAGE_NAMES = {r["passage_id"]: r["name"] for r in csv.DictReader(f)}
 PLANNER = CargoPlanner(GRAPH)
 PORT_LIST = sorted(({"id": pid, "name": p["name"], "country": p["country"] or "",
-                     "lat": float(p["lat"]), "lon": float(p["lon"]), "size": p["harbor_size"] or ""}
+                     "lat": float(p["lat"]), "lon": float(p["lon"]), "size": p["harbor_size"] or "",
+                     "region": p["region_name"] or ""}
                     for pid, p in GRAPH.ports.items()), key=lambda p: (p["name"], p["country"]))
 # "size" is OurAirports' own type, large or medium (see neo4j-datamodel/ASSUMPTIONS.md, Airfields).
 AIRFIELD_LIST = sorted(({"id": fid, "code": r["icao_code"] or r["iata_code"] or "", "name": r["name"],
@@ -147,7 +148,7 @@ def _priority(v):
 
 def find_options(body):
     """The ways to make one move side by side (planner screen, step 1): by sea and
-    by air, days door to door. With areas drawn, "before" holds the same options
+    by air, in days port to port. With areas drawn, "before" holds the same options
     with no areas, so the screen can show the days each area adds."""
     origin, goal = body.get("from"), body.get("to")
     if origin not in GRAPH.ports or goal not in GRAPH.ports:

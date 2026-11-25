@@ -67,6 +67,14 @@
   #tip { position: absolute; display: none; pointer-events: none; max-width: 320px; padding: 7px 10px;
          background: rgba(17,22,28,.96); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; line-height: 1.45; }
   #tip b { color: #fff; } #tip .dim { color: var(--dim); }
+  .pick { position: relative; }
+  .suggest { position: absolute; left: 0; right: 0; top: calc(100% + 3px); z-index: 20; list-style: none; margin: 0;
+             padding: 4px; background: var(--panel); border: 1px solid #3a4a58; border-radius: 6px; }
+  .suggest li { padding: 5px 8px; border-radius: 4px; cursor: pointer; }
+  .suggest li.on { background: #24313d; }
+  .suggest .n { font-size: 13px; } .suggest .n mark { background: none; color: #fff; font-weight: 700; }
+  .suggest .m { font-size: 11.5px; color: var(--dim); }
+  .suggest li.none { cursor: default; color: var(--dim); font-size: 12.5px; }
   #options { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 14px; }
   #options:empty { display: none; }
   #options .head { grid-column: 1 / -1; font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
@@ -136,10 +144,9 @@
       <p class="hint" id="scenarioHint"></p>
     </div>
     <label for="from">Origin port</label>
-    <input id="from" list="ports" autocomplete="off" placeholder="Type a port name">
+    <div class="pick"><input id="from" autocomplete="off" spellcheck="false" placeholder="Type a port name"></div>
     <label for="to">Destination port</label>
-    <input id="to" list="ports" autocomplete="off" placeholder="Type a port name">
-    <datalist id="ports"></datalist>
+    <div class="pick"><input id="to" autocomplete="off" spellcheck="false" placeholder="Type a port name"></div>
     <div class="row routes-only">
       <div><label for="k">Routes (K)</label>
         <select id="k"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></div>
@@ -227,7 +234,7 @@ let currentFrom = null, currentTo = null, last = null;
 let areas = [];           // [{kind: "denial" | "wez", type: "circle", center, radius_nm} | {kind, type: "polygon", points}]
 let mode = null, draft = null;          // drawing mode
 let appMode = "routes", drawKind = "denial", meta = null, tons = {}, prios = {}, priority = "economic", labelOf = {};
-let opts = null, routeView = "sea";     // Routes: the ways there (by sea, by air), and which one the map shows
+let opts = null, routeView = "sea";     // Routes: the transport options (by sea, by air), and which one the map shows
 const denialAreas = () => areas.filter(a => a.kind !== "wez");
 const wezAreas = () => areas.filter(a => a.kind === "wez");
 
@@ -360,18 +367,18 @@ function drawCargo(route = null) {
   }
 }
 
-// ------------------------------------------------------------ ways there
-// Planner screen, step 1: by sea and by air side by side for this move, days door to door.
+// ----------------------------------------------------- transport options
+// Planner screen, step 1: by sea and by air side by side for this move, in days port to port.
 const OPT_TITLE = {
-  sea: "Door to door: sailing at 18 knots, plus a day in each port where cargo is worked. Illustrative allowances, not planning factors. Click to show the sea routes.",
-  air: "Door to door: the road to and from each airport, flying at cruise speed with any refuelling stops, and 4 hours at each airport. Illustrative allowances, not planning factors. Click to show it on the map.",
+  sea: "Port to port: sailing at 18 knots, plus a day in each port where cargo is worked. Illustrative allowances, not planning factors. Click to show the sea routes.",
+  air: "Port to port: the road to and from each airport, flying at cruise speed with any refuelling stops, and 4 hours at each airport. Illustrative allowances, not planning factors. Click to show it on the map.",
 };
 
 function renderOptions() {
   const box = el("options"); box.innerHTML = "";
   document.body.classList.toggle("air-view", routeView === "air" && appMode !== "cargo");
   if (!opts || appMode === "cargo") return;
-  box.innerHTML = `<div class="head">Ways there, door to door</div>`;
+  box.innerHTML = `<div class="head">Transport options</div>`;
   for (const kind of ["sea", "air"]) {
     const o = opts[kind], before = opts.before && opts.before[kind];
     const label = kind === "sea" ? "By sea" : o.mode === "air_sea" ? "By air, then sea"
@@ -495,6 +502,85 @@ function showHover(hit, e) {          // what it is, and its size as the source 
   tip.style.left = x + "px"; tip.style.top = y + "px";
 }
 
+// ----------------------------------------------------------- port search
+// The origin and destination boxes suggest ports as you type, best first: the exact name, then the
+// ports of a country typed in full ("guam"), then names that start with what you typed, then a word in the name that does, then names containing it, then
+// names and countries that hold every word typed ("busan korea"). Bigger harbors win ties. Top 8 shown.
+// Arrow keys move, Enter picks and finds routes, Esc closes.
+const SIZE_RANK = { Large: 0, Medium: 1, Small: 2, "Very Small": 3 };
+const norm = s => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+function searchPorts(text) {
+  const q = norm(text.trim()), words = q.split(/[^a-z0-9]+/).filter(Boolean);
+  if (!words.length) return [];
+  const hits = [];
+  for (const p of portList) {
+    const tier = p._n === q ? 0 : p._c === q ? 1 : p._n.startsWith(q) ? 2 : p._nw.some(w => w.startsWith(q)) ? 3
+               : p._n.includes(q) ? 4 : words.every(t => p._w.some(w => w.startsWith(t))) ? 5 : -1;
+    if (tier >= 0) hits.push([tier, SIZE_RANK[p.size] ?? 4, p.name.length, p]);
+  }
+  hits.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3].name.localeCompare(b[3].name));
+  return hits.slice(0, 8).map(h => h[3]);
+}
+
+function marked(p, text) {          // the name, with the part that matched what was typed in bold
+  const q = norm(text.trim()), i = p._n.indexOf(q);
+  if (!q || i < 0 || p._n.length !== p.name.length) return esc(p.name);
+  return esc(p.name.slice(0, i)) + `<mark>${esc(p.name.slice(i, i + q.length))}</mark>` + esc(p.name.slice(i + q.length));
+}
+
+function attachSearch(input) {
+  const list = document.createElement("ul");
+  list.className = "suggest"; list.id = input.id + "-list"; list.hidden = true;
+  list.setAttribute("role", "listbox");
+  input.parentElement.appendChild(list);
+  input.setAttribute("role", "combobox"); input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-controls", list.id); input.setAttribute("aria-expanded", "false");
+  let items = [], active = -1;
+  const close = () => {
+    list.hidden = true; items = []; active = -1;
+    input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant");
+  };
+  const mark = i => {
+    active = i;
+    [...list.children].forEach((li, j) => li.classList.toggle("on", j === i));
+    if (i >= 0) { input.setAttribute("aria-activedescendant", `${list.id}-${i}`); list.children[i].scrollIntoView({ block: "nearest" }); }
+  };
+  const pick = p => { input.value = labelOf[p.id]; close(); go(true); };
+  const render = () => {
+    const text = input.value;
+    if (!text.trim()) return close();
+    items = searchPorts(text); list.innerHTML = "";
+    if (!items.length) list.innerHTML = `<li class="none">No port matches “${esc(text.trim())}”</li>`;
+    items.forEach((p, i) => {
+      const li = document.createElement("li");
+      li.id = `${list.id}-${i}`; li.setAttribute("role", "option");
+      const extra = p._tag ? ` · ${esc(p._tag)}` : "";
+      li.innerHTML = `<div class="n">${marked(p, text)}${p.country ? ", " + esc(p.country) : ""}</div>` +
+                     `<div class="m">Port${p.size ? ` · ${esc(p.size)} harbor` : ""}${extra}</div>`;
+      li.addEventListener("pointerdown", e => { e.preventDefault(); pick(p); });   // before the box loses focus
+      li.addEventListener("pointermove", () => active !== i && mark(i));
+      list.appendChild(li);
+    });
+    list.hidden = false; input.setAttribute("aria-expanded", "true");
+    mark(items.length ? 0 : -1);
+  };
+  input.addEventListener("input", render);
+  input.addEventListener("focus", () => input.select());          // start typing to replace the port
+  input.addEventListener("blur", close);
+  input.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (list.hidden) return render();
+      if (items.length) mark((active + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (!list.hidden && active >= 0) return pick(items[active]);
+      close(); go(true);
+    } else if (e.key === "Escape") close();
+  });
+}
+
 // -------------------------------------------------------------- results
 function renderResults() {
   const ol = el("results"), sum = el("summary");
@@ -597,7 +683,7 @@ async function go(fit = false) {
   const msg = el("msg");
   currentFrom = byLabel[el("from").value]; currentTo = byLabel[el("to").value];
   drawMarks();
-  if (!currentFrom || !currentTo) { msg.className = "err"; msg.textContent = "Pick both ports from the list."; return; }
+  if (!currentFrom || !currentTo) { msg.className = "err"; msg.textContent = "Pick both ports from the suggestions as you type."; return; }
   const cargoMode = appMode === "cargo";
   const plain = list => list.map(({ kind, ...a }) => a);
   let url = "/api/routes", body = { from: currentFrom, to: currentTo, k: +el("k").value, method: el("method").value,
@@ -613,7 +699,7 @@ async function go(fit = false) {
   const ticket = ++pending;
   const post = (u, b) => fetch(u, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) })
     .then(r => r.json());
-  // Routes also asks for the ways there (by sea, by air) for the same move, alongside the sea routes.
+  // Routes also asks for the transport options (by sea, by air) for the same move, alongside the sea routes.
   const ways = cargoMode ? null
     : post("/api/options", { from: currentFrom, to: currentTo, areas: plain(denialAreas()) }).catch(() => null);
   const data = await post(url, body);
@@ -778,14 +864,22 @@ async function boot() {
   el("showPorts").onclick = () => { layers.port = !layers.port; drawNodes(); clearHover(); };
   el("showAirfields").onclick = () => { layers.air = !layers.air; drawNodes(); clearHover(); };
   drawNodes();
-  const count = {};
-  for (const p of ports) { const b = p.country ? `${p.name}, ${p.country}` : p.name; count[b] = (count[b] || 0) + 1; }
-  const list = el("ports");
+  // A port's label is "Name, Country"; ports that share one are told apart by their region,
+  // or by their id if they share that too.
+  const count = {}, base = p => p.country ? `${p.name}, ${p.country}` : p.name;
+  for (const p of ports) count[base(p)] = (count[base(p)] || 0) + 1;
+  const regional = {}, region = p => p.region.replace(/\s*--\s*\d+\s*$/, "");     // "Kriti -- 43080" -> "Kriti"
+  for (const p of ports) if (count[base(p)] > 1) { const k = `${base(p)} (${region(p)})`; regional[k] = (regional[k] || 0) + 1; }
   for (const p of ports) {
-    const base = p.country ? `${p.name}, ${p.country}` : p.name;
-    const label = count[base] > 1 ? `${base} (${p.id})` : base;
+    let label = base(p);
+    if (count[label] > 1) {
+      p._tag = region(p) && regional[`${label} (${region(p)})`] === 1 ? region(p) : p.id;
+      label = `${label} (${p._tag})`;
+    }
     byLabel[label] = p.id; byId[p.id] = p;
-    list.appendChild(new Option(label));
+    p._n = norm(p.name); p._c = norm(p.country);
+    p._nw = p._n.split(/[^a-z0-9]+/).filter(Boolean);
+    p._w = norm(base(p)).split(/[^a-z0-9]+/).filter(Boolean);
   }
   for (const l in byLabel) labelOf[byLabel[l]] = l;
   const labelNamed = name => Object.keys(byLabel).find(l => byId[byLabel[l]].name === name);
@@ -819,7 +913,7 @@ async function boot() {
   el("method").onchange = () => { hint(); go(); };
   el("k").onchange = () => go();
   el("go").onclick = () => go(true);
-  for (const id of ["from", "to"]) el(id).addEventListener("keydown", e => { if (e.key === "Enter") go(true); });
+  attachSearch(el("from")); attachSearch(el("to"));
   el("drawCircle").onclick = () => setMode(mode === "circle" ? null : "circle");
   el("drawPoly").onclick = () => setMode(mode === "polygon" ? null : "polygon");
   el("clearAreas").onclick = () => { areas = []; setMode(null); drawAreas(); go(); };
